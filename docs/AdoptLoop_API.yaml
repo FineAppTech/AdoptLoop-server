@@ -1,0 +1,772 @@
+openapi: 3.1.0
+info:
+  title: AdoptLoop API
+  version: 0.1.0
+  description: |
+    AdoptLoop 백엔드 JSON REST API 명세.
+
+    **관련 문서**
+    - 도메인/요구사항: [`AdoptLoop_SPEC.md`](./AdoptLoop_SPEC.md)
+    - 단계별 DB 연산: [`AdoptLoop_DOMAIN_FLOW.md`](./AdoptLoop_DOMAIN_FLOW.md)
+    - 기술 스택: [`AdoptLoop_TECH_STACK.md`](./AdoptLoop_TECH_STACK.md)
+
+    **범위 / 비범위**
+    - 본 문서는 JSON REST 엔드포인트만 다룬다.
+    - 관리자 Thymeleaf HTML 라우트(`GET /admin/...`)와 응답자 SPA(`GET /s/{slug}`)는
+      페이지 진입점이며 OpenAPI 모델에 포함하지 않는다. (페이지 내부 JS가 아래 API를 호출)
+
+    **인증 (SPEC 8장)**
+    - 관리자: `X-Admin-Key` 헤더 (평문). 서버는 SHA-256 해시 후 `admins.key_hash`와 비교.
+    - 응답자: `access_token`을 경로에 포함. `survey_responses.access_token`과 일치해야 함.
+      추가로 `surveys.deadline > now()` 여야 쓰기 허용.
+
+    **공통 오류 규약**
+    - 모든 오류는 `Error` 스키마(JSON). HTTP status가 1차 시그널.
+    - 검증 실패는 `400`, 인증 실패 `401`, 권한/만료 `403`, 미존재 `404`, 충돌 `409`.
+
+servers:
+  - url: http://localhost:8080
+    description: 로컬 개발
+  - url: https://{host}
+    description: 배포 (ECS 뒤 ALB 등)
+    variables:
+      host:
+        default: api.adoptloop.example
+
+tags:
+  - name: adoptions
+    description: 도입 항목 (관리자)
+  - name: surveys
+    description: 설문 (관리자) — 생성/편집/발행
+  - name: analyses
+    description: AI 분석 (관리자) — 트리거/조회
+  - name: action-items
+    description: 액션 아이템 (관리자) — 채택/상태
+  - name: public-survey
+    description: 응답자 공개 API — 토큰 기반
+
+security:
+  - AdminKey: []
+
+paths:
+  # ─────────────────────────────────────────────────────────────
+  # 관리자 — 도입 항목 (DOMAIN_FLOW Step 1-2)
+  # ─────────────────────────────────────────────────────────────
+  /api/admin/adoptions:
+    get:
+      tags: [adoptions]
+      summary: 도입 항목 목록
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Adoption' }
+    post:
+      tags: [adoptions]
+      summary: 도입 항목 생성 (Step 1-2)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdoptionCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Adoption' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/admin/adoptions/{adoptionId}:
+    parameters:
+      - $ref: '#/components/parameters/AdoptionId'
+    get:
+      tags: [adoptions]
+      summary: 도입 항목 상세
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdoptionDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [adoptions]
+      summary: 도입 항목 수정 / 상태 변경 (active → archived)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdoptionUpdate' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Adoption' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ─────────────────────────────────────────────────────────────
+  # 관리자 — 설문 생성 / 편집 / 발행 (Step 3-4)
+  # ─────────────────────────────────────────────────────────────
+  /api/admin/adoptions/{adoptionId}/surveys:
+    parameters:
+      - $ref: '#/components/parameters/AdoptionId'
+    post:
+      tags: [surveys]
+      summary: AI 설문 초안 생성 (Step 3)
+      description: |
+        Bedrock 호출로 문항 JSON을 생성하고 `surveys('draft') + questions + question_options`를
+        한 트랜잭션으로 저장한다. 응답은 생성된 survey 전체.
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SurveyDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '502':
+          description: Bedrock 호출 실패
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/admin/surveys/{surveyId}:
+    parameters:
+      - $ref: '#/components/parameters/SurveyId'
+    get:
+      tags: [surveys]
+      summary: 설문 상세 (문항·옵션 포함)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SurveyDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/admin/surveys/{surveyId}/questions:
+    parameters:
+      - $ref: '#/components/parameters/SurveyId'
+    put:
+      tags: [surveys]
+      summary: 문항 일괄 교체 (Step 4 편집)
+      description: |
+        기존 questions/question_options를 전치환한다 (DELETE → INSERT).
+        `status='draft'`인 설문에서만 허용. 발행 후 호출 시 `409`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items: { $ref: '#/components/schemas/QuestionInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SurveyDetail' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/admin/surveys/{surveyId}/publish:
+    parameters:
+      - $ref: '#/components/parameters/SurveyId'
+    post:
+      tags: [surveys]
+      summary: 설문 발행 (Step 4)
+      description: |
+        `status='published'`, `deadline` 확정, 옵션으로 `slack_webhook_url` 저장.
+        커밋 성공 후 Slack 발행 알림 단발 POST(send-after-commit).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SurveyPublish' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Survey' }
+        '409':
+          description: 이미 published이거나 questions가 0개
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ─────────────────────────────────────────────────────────────
+  # 관리자 — 집계·분석 (Step 6-8)
+  # ─────────────────────────────────────────────────────────────
+  /api/admin/surveys/{surveyId}/aggregate:
+    parameters:
+      - $ref: '#/components/parameters/SurveyId'
+    get:
+      tags: [analyses]
+      summary: 응답 집계 (Step 6, 읽기 전용)
+      description: single_choice 분포 + scale 평균 + 참여 수/율.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Aggregate' }
+
+  /api/admin/surveys/{surveyId}/analyses:
+    parameters:
+      - $ref: '#/components/parameters/SurveyId'
+    post:
+      tags: [analyses]
+      summary: AI 분석 실행 (Step 6-8)
+      description: |
+        `surveys.deadline < now()`일 때만 허용. LLM 1회 호출 → `analyses` 새 행 INSERT.
+        액션 제안은 응답 본문(`suggested_action_items`)에만 포함되며 DB에 저장되지 않는다.
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnalysisResult' }
+        '403':
+          description: 마감 전
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    get:
+      tags: [analyses]
+      summary: 분석 이력 목록 (최신순)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Analysis' }
+
+  /api/admin/surveys/{surveyId}/analyses/latest:
+    parameters:
+      - $ref: '#/components/parameters/SurveyId'
+    get:
+      tags: [analyses]
+      summary: 최신 분석 1건 (ORDER BY created_at DESC LIMIT 1)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Analysis' }
+        '404':
+          description: 분석 이력 없음
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  # ─────────────────────────────────────────────────────────────
+  # 관리자 — 액션 아이템 (Step 9)
+  # ─────────────────────────────────────────────────────────────
+  /api/admin/adoptions/{adoptionId}/action-items:
+    parameters:
+      - $ref: '#/components/parameters/AdoptionId'
+    get:
+      tags: [action-items]
+      summary: 도입 항목별 액션 아이템 목록
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ActionItem' }
+    post:
+      tags: [action-items]
+      summary: 분석 제안을 채택해 액션 아이템 생성 (Step 9)
+      description: 비채택은 INSERT 하지 않음으로 표현. 입력은 분석 응답의 제안 배열 일부.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items: { $ref: '#/components/schemas/ActionItemCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ActionItem' }
+
+  /api/admin/action-items/{actionItemId}:
+    parameters:
+      - name: actionItemId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    patch:
+      tags: [action-items]
+      summary: 액션 아이템 상태 갱신
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ActionItemUpdate' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActionItem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ─────────────────────────────────────────────────────────────
+  # 응답자 공개 API (Step 5)
+  # ─────────────────────────────────────────────────────────────
+  /api/public/surveys/{publicSlug}:
+    parameters:
+      - name: publicSlug
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [public-survey]
+      summary: 응답자용 설문 정보 조회
+      description: 랜딩 페이지가 호출. published이고 deadline 전이어야 정상 응답.
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicSurvey' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '410':
+          description: 마감됨
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/public/surveys/{publicSlug}/responses:
+    parameters:
+      - name: publicSlug
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [public-survey]
+      summary: 설문 시작 — access_token 발급 (Step 5 upfront)
+      description: |
+        `survey_responses(status='in_progress')` INSERT 후 `access_token` 반환.
+        클라이언트는 토큰을 `localStorage`에 저장하고 이후 호출에 사용.
+      security: []
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResponseToken' }
+        '410':
+          description: 마감됨
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/public/responses/{accessToken}:
+    parameters:
+      - name: accessToken
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [public-survey]
+      summary: 본인 응답 로드 (마감 전 재방문 수정용)
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicResponse' }
+        '401':
+          description: 토큰 없음/잘못됨
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/public/responses/{accessToken}/answers:
+    parameters:
+      - name: accessToken
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      tags: [public-survey]
+      summary: 응답 제출/수정 (Step 5)
+      description: |
+        제출/수정 모두 전치환. DELETE answers → INSERT answers.
+        최초 제출 시 `submitted_at` 기록, 이후 수정 시에는 갱신하지 않음.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items: { $ref: '#/components/schemas/AnswerInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicResponse' }
+        '401': { description: 토큰 없음/잘못됨 }
+        '403':
+          description: 마감 경과
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+# ─────────────────────────────────────────────────────────────
+# Components
+# ─────────────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    AdminKey:
+      type: apiKey
+      in: header
+      name: X-Admin-Key
+      description: 평문 키. 서버에서 SHA-256 해시 후 `admins.key_hash`와 비교.
+
+  parameters:
+    AdoptionId:
+      name: adoptionId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    SurveyId:
+      name: surveyId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+
+  responses:
+    BadRequest:
+      description: 입력 검증 실패
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: 리소스 없음
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: "상태 충돌 (예: 발행된 설문 편집)"
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, examples: [VALIDATION_FAILED] }
+        message: { type: string }
+        details:
+          type: object
+          additionalProperties: true
+
+    # ── Adoption
+    AdoptionCreate:
+      type: object
+      required: [name, goal, target_audience, target_count]
+      properties:
+        name: { type: string, examples: ["Jira 도입"] }
+        goal: { type: string }
+        target_audience: { type: string }
+        concern: { type: string, nullable: true }
+        target_count: { type: integer, minimum: 1 }
+    AdoptionUpdate:
+      type: object
+      properties:
+        name: { type: string }
+        goal: { type: string }
+        target_audience: { type: string }
+        concern: { type: string, nullable: true }
+        target_count: { type: integer, minimum: 1 }
+        status: { type: string, enum: [active, archived] }
+    Adoption:
+      type: object
+      required: [id, admin_id, name, status, target_count, created_at]
+      properties:
+        id: { type: integer, format: int64 }
+        admin_id: { type: integer, format: int64 }
+        name: { type: string }
+        goal: { type: string }
+        target_audience: { type: string }
+        concern: { type: string, nullable: true }
+        target_count: { type: integer }
+        status: { type: string, enum: [active, archived] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AdoptionDetail:
+      allOf:
+        - $ref: '#/components/schemas/Adoption'
+        - type: object
+          properties:
+            surveys:
+              type: array
+              items: { $ref: '#/components/schemas/Survey' }
+            action_items:
+              type: array
+              items: { $ref: '#/components/schemas/ActionItem' }
+
+    # ── Survey / Question / Option
+    Survey:
+      type: object
+      required: [id, adoption_id, title, status, public_slug, created_at]
+      properties:
+        id: { type: integer, format: int64 }
+        adoption_id: { type: integer, format: int64 }
+        title: { type: string }
+        public_slug: { type: string }
+        status: { type: string, enum: [draft, published] }
+        deadline: { type: string, format: date-time, nullable: true }
+        slack_webhook_url: { type: string, nullable: true }
+        published_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+    SurveyDetail:
+      allOf:
+        - $ref: '#/components/schemas/Survey'
+        - type: object
+          properties:
+            questions:
+              type: array
+              items: { $ref: '#/components/schemas/Question' }
+    SurveyPublish:
+      type: object
+      required: [deadline]
+      properties:
+        deadline: { type: string, format: date-time }
+        slack_webhook_url: { type: string, nullable: true }
+
+    Question:
+      type: object
+      required: [id, type, text, order_index, required]
+      properties:
+        id: { type: integer, format: int64 }
+        type: { type: string, enum: [text, single_choice, scale] }
+        text: { type: string }
+        order_index: { type: integer }
+        required: { type: boolean }
+        axis:
+          type: string
+          enum: [usage, behavior, value]
+          nullable: true
+          description: scale 문항에만 의미
+        options:
+          type: array
+          items: { $ref: '#/components/schemas/QuestionOption' }
+    QuestionInput:
+      type: object
+      required: [type, text, order_index]
+      properties:
+        type: { type: string, enum: [text, single_choice, scale] }
+        text: { type: string }
+        order_index: { type: integer }
+        required: { type: boolean, default: true }
+        axis: { type: string, enum: [usage, behavior, value], nullable: true }
+        options:
+          type: array
+          description: single_choice일 때만
+          items:
+            type: object
+            required: [text, order_index]
+            properties:
+              text: { type: string }
+              order_index: { type: integer }
+    QuestionOption:
+      type: object
+      required: [id, text, order_index]
+      properties:
+        id: { type: integer, format: int64 }
+        text: { type: string }
+        order_index: { type: integer }
+
+    # ── Aggregate / Analysis
+    Aggregate:
+      type: object
+      required: [participants, target_count, participation_rate, per_question]
+      properties:
+        participants: { type: integer }
+        target_count: { type: integer }
+        participation_rate: { type: number, format: float }
+        per_question:
+          type: array
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/AggregateChoice'
+              - $ref: '#/components/schemas/AggregateScale'
+              - $ref: '#/components/schemas/AggregateText'
+            discriminator:
+              propertyName: type
+    AggregateChoice:
+      type: object
+      required: [question_id, type, distribution]
+      properties:
+        question_id: { type: integer, format: int64 }
+        type: { type: string, enum: [single_choice] }
+        distribution:
+          type: array
+          items:
+            type: object
+            required: [option_id, count]
+            properties:
+              option_id: { type: integer, format: int64 }
+              count: { type: integer }
+    AggregateScale:
+      type: object
+      required: [question_id, type, average, count]
+      properties:
+        question_id: { type: integer, format: int64 }
+        type: { type: string, enum: [scale] }
+        axis: { type: string, enum: [usage, behavior, value] }
+        average: { type: number, format: float }
+        count: { type: integer }
+    AggregateText:
+      type: object
+      required: [question_id, type, values]
+      properties:
+        question_id: { type: integer, format: int64 }
+        type: { type: string, enum: [text] }
+        values:
+          type: array
+          items: { type: string }
+
+    Analysis:
+      type: object
+      required:
+        - id
+        - survey_id
+        - adoption_score
+        - usage_score
+        - behavior_score
+        - value_score
+        - created_at
+      properties:
+        id: { type: integer, format: int64 }
+        survey_id: { type: integer, format: int64 }
+        adoption_score: { type: number, format: float, minimum: 0, maximum: 100 }
+        usage_score: { type: number, format: float }
+        behavior_score: { type: number, format: float }
+        value_score: { type: number, format: float }
+        positive_signals:
+          description: JSONB. LLM 출력 문자열 배열 또는 구조.
+          oneOf:
+            - { type: array, items: { type: string } }
+            - { type: object, additionalProperties: true }
+        resistance_factors:
+          oneOf:
+            - { type: array, items: { type: string } }
+            - { type: object, additionalProperties: true }
+        risks:
+          oneOf:
+            - { type: array, items: { type: string } }
+            - { type: object, additionalProperties: true }
+        raw_output:
+          type: object
+          additionalProperties: true
+        created_at: { type: string, format: date-time }
+    AnalysisResult:
+      description: |
+        분석 실행 응답. 저장된 `analysis` + 채택 후보로 제시되는 액션 제안 배열.
+        제안은 이 응답에만 존재하고 채택해야 `action_items`로 저장된다.
+      type: object
+      required: [analysis, suggested_action_items]
+      properties:
+        analysis: { $ref: '#/components/schemas/Analysis' }
+        suggested_action_items:
+          type: array
+          items:
+            type: object
+            required: [title, priority]
+            properties:
+              title: { type: string }
+              description: { type: string, nullable: true }
+              priority: { type: string, enum: [high, medium, low] }
+
+    # ── Action items
+    ActionItem:
+      type: object
+      required: [id, adoption_id, analysis_id, title, priority, status, created_at]
+      properties:
+        id: { type: integer, format: int64 }
+        adoption_id: { type: integer, format: int64 }
+        analysis_id: { type: integer, format: int64 }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        priority: { type: string, enum: [high, medium, low] }
+        status: { type: string, enum: [todo, in_progress, done] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ActionItemCreate:
+      type: object
+      required: [analysis_id, title, priority]
+      properties:
+        analysis_id: { type: integer, format: int64 }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        priority: { type: string, enum: [high, medium, low] }
+    ActionItemUpdate:
+      type: object
+      properties:
+        status: { type: string, enum: [todo, in_progress, done] }
+
+    # ── Public (응답자)
+    PublicSurvey:
+      type: object
+      required: [title, deadline, questions]
+      properties:
+        title: { type: string }
+        deadline: { type: string, format: date-time }
+        questions:
+          type: array
+          items: { $ref: '#/components/schemas/Question' }
+    ResponseToken:
+      type: object
+      required: [access_token]
+      properties:
+        access_token: { type: string, description: URL-safe 랜덤. localStorage 저장 권장. }
+    PublicResponse:
+      type: object
+      required: [survey, status, answers]
+      properties:
+        survey: { $ref: '#/components/schemas/PublicSurvey' }
+        status: { type: string, enum: [in_progress, submitted] }
+        submitted_at: { type: string, format: date-time, nullable: true }
+        answers:
+          type: array
+          items: { $ref: '#/components/schemas/Answer' }
+    Answer:
+      type: object
+      required: [question_id]
+      description: type에 따라 text_value | question_option_id | scale_value 중 하나만 채워진다.
+      properties:
+        question_id: { type: integer, format: int64 }
+        text_value: { type: string, nullable: true }
+        question_option_id: { type: integer, format: int64, nullable: true }
+        scale_value: { type: integer, minimum: 1, maximum: 5, nullable: true }
+    AnswerInput:
+      type: object
+      required: [question_id]
+      properties:
+        question_id: { type: integer, format: int64 }
+        text_value: { type: string, nullable: true }
+        question_option_id: { type: integer, format: int64, nullable: true }
+        scale_value: { type: integer, minimum: 1, maximum: 5, nullable: true }
