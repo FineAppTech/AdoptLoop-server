@@ -704,7 +704,7 @@ class AdminKeyFilterTest @Autowired constructor(
     }
 }
 
-// 200 통과 케이스는 M2.3 AdoptionControllerTest에서 자연스럽게 검증된다.
+// 200 통과 케이스는 M2.4 AdoptionControllerTest에서 자연스럽게 검증된다.
 ```
 
 - [ ] **Step 2: 테스트 실행 (FAIL)**
@@ -1187,7 +1187,131 @@ git commit -m "domain: 8 JPA repositories"
 
 ---
 
-### Task 2.3: Adoption DTO + Service + Controller (TDD)
+### Task 2.3: ControllerTestBase + REST Docs JUnit Extension (인프라)
+
+**Files:**
+- Create: `src/test/kotlin/com/tnear/adoptloop/restdocs/DocCallTracker.kt`
+- Create: `src/test/kotlin/com/tnear/adoptloop/restdocs/RequireDocumentationExtension.kt`
+- Create: `src/test/kotlin/com/tnear/adoptloop/restdocs/RestDocs.kt`
+- Create: `src/test/kotlin/com/tnear/adoptloop/ControllerTestBase.kt`
+- Create: `src/docs/asciidoc/index.adoc`
+
+> **목적**: ADR-0009 강제력 구현. 컨트롤러 endpoint 테스트가 `documentApi(...)`를 호출하지 않으면 테스트 fail. 본 task 자체엔 자동 테스트가 없고, 다음 task `AdoptionControllerTest`에서 강제 동작이 자연스럽게 검증된다.
+
+- [ ] **Step 1: DocCallTracker.kt**
+
+```kotlin
+package com.tnear.adoptloop.restdocs
+
+object DocCallTracker {
+    private val called = ThreadLocal.withInitial { false }
+    fun reset() { called.set(false) }
+    fun mark() { called.set(true) }
+    fun wasCalled(): Boolean = called.get()
+}
+```
+
+- [ ] **Step 2: RequireDocumentationExtension.kt**
+
+```kotlin
+package com.tnear.adoptloop.restdocs
+
+import org.junit.jupiter.api.extension.AfterEachCallback
+import org.junit.jupiter.api.extension.BeforeEachCallback
+import org.junit.jupiter.api.extension.ExtensionContext
+
+class RequireDocumentationExtension : BeforeEachCallback, AfterEachCallback {
+    override fun beforeEach(ctx: ExtensionContext) { DocCallTracker.reset() }
+    override fun afterEach(ctx: ExtensionContext) {
+        if (ctx.executionException.isEmpty && !DocCallTracker.wasCalled()) {
+            throw AssertionError(
+                "Controller test '${ctx.displayName}' did not call documentApi(...). " +
+                "REST Docs is enforced (ADR-0009)."
+            )
+        }
+    }
+}
+```
+
+- [ ] **Step 3: RestDocs.kt (documentApi 헬퍼)**
+
+```kotlin
+package com.tnear.adoptloop.restdocs
+
+import org.springframework.restdocs.mockmvc.MockMvcRestDocumentation
+import org.springframework.restdocs.snippet.Snippet
+import org.springframework.test.web.servlet.ResultHandler
+
+// 표준 `document(...)` 대신 반드시 이걸 호출한다.
+// DocCallTracker가 호출 여부를 추적하므로 우회 시 RequireDocumentationExtension이 fail시킨다.
+fun documentApi(identifier: String, vararg snippets: Snippet): ResultHandler {
+    DocCallTracker.mark()
+    return MockMvcRestDocumentation.document(identifier, *snippets)
+}
+```
+
+- [ ] **Step 4: ControllerTestBase.kt**
+
+```kotlin
+package com.tnear.adoptloop
+
+import com.tnear.adoptloop.restdocs.RequireDocumentationExtension
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.extension.ExtendWith
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.restdocs.RestDocumentationContextProvider
+import org.springframework.restdocs.RestDocumentationExtension
+import org.springframework.restdocs.mockmvc.MockMvcRestDocumentation.documentationConfiguration
+import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.setup.DefaultMockMvcBuilder
+import org.springframework.test.web.servlet.setup.MockMvcBuilders
+import org.springframework.web.context.WebApplicationContext
+
+@ExtendWith(RestDocumentationExtension::class, RequireDocumentationExtension::class)
+abstract class ControllerTestBase : IntegrationTestBase() {
+    @Autowired protected lateinit var context: WebApplicationContext
+    protected lateinit var mvc: MockMvc
+
+    @BeforeEach
+    fun setUpMvc(restDocumentation: RestDocumentationContextProvider) {
+        mvc = MockMvcBuilders.webAppContextSetup(context)
+            .apply<DefaultMockMvcBuilder>(documentationConfiguration(restDocumentation))
+            .build()
+    }
+}
+```
+
+> 규칙: 컨트롤러 endpoint 테스트는 `IntegrationTestBase`가 아닌 **`ControllerTestBase`**를 상속한다. 그리고 표준 `document(...)` 대신 **`documentApi(...)`**를 호출해야 한다.
+
+- [ ] **Step 5: src/docs/asciidoc/index.adoc (placeholder)**
+
+```asciidoc
+= AdoptLoop API Reference
+:source-highlighter: highlightjs
+:toc: left
+:icons: font
+
+이 문서는 빌드 시 `build/generated-snippets/`에서 자동 생성된다.
+컨트롤러 endpoint별 스니펫이 추가되면 `include::{snippets}/<operation-id>/...[]`로 합본한다.
+```
+
+- [ ] **Step 6: 빌드 검증**
+
+Run: `./gradlew compileTestKotlin`
+Expected: 0 종료.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/test/kotlin/com/tnear/adoptloop/ControllerTestBase.kt \
+        src/test/kotlin/com/tnear/adoptloop/restdocs \
+        src/docs/asciidoc
+git commit -m "test: ControllerTestBase + RequireDocumentationExtension (REST Docs 강제, ADR-0009)"
+```
+
+---
+
+### Task 2.4: Adoption DTO + Service + Controller (TDD)
 
 **Files:**
 - Create: `src/main/kotlin/com/tnear/adoptloop/adoption/AdoptionDtos.kt`
@@ -1201,26 +1325,24 @@ git commit -m "domain: 8 JPA repositories"
 package com.tnear.adoptloop.adoption
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.tnear.adoptloop.IntegrationTestBase
+import com.tnear.adoptloop.ControllerTestBase
 import com.tnear.adoptloop.domain.Admin
 import com.tnear.adoptloop.domain.repo.AdminRepository
+import com.tnear.adoptloop.restdocs.documentApi
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.http.MediaType
-import org.springframework.test.web.servlet.MockMvc
+import org.springframework.restdocs.payload.PayloadDocumentation.fieldWithPath
+import org.springframework.restdocs.payload.PayloadDocumentation.requestFields
+import org.springframework.restdocs.payload.PayloadDocumentation.responseFields
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 import java.security.MessageDigest
 
-@SpringBootTest
-@AutoConfigureMockMvc
 class AdoptionControllerTest @Autowired constructor(
-    private val mvc: MockMvc,
     private val adminRepo: AdminRepository,
     private val om: ObjectMapper,
-) : IntegrationTestBase() {
+) : ControllerTestBase() {
 
     private fun seedAdminKey(): String {
         val raw = "k-${System.nanoTime()}"
@@ -1249,6 +1371,26 @@ class AdoptionControllerTest @Autowired constructor(
             .andExpect(jsonPath("$.id").exists())
             .andExpect(jsonPath("$.name").value("Jira 도입"))
             .andExpect(jsonPath("$.status").value("ACTIVE"))
+            .andDo(documentApi("create-adoption",
+                requestFields(
+                    fieldWithPath("name").description("도입 이름"),
+                    fieldWithPath("goal").description("도입 목적"),
+                    fieldWithPath("target_audience").description("대상"),
+                    fieldWithPath("target_count").description("대상 인원수"),
+                ),
+                responseFields(
+                    fieldWithPath("id").description("도입 ID"),
+                    fieldWithPath("admin_id").description("소유 admin ID"),
+                    fieldWithPath("name").description("도입 이름"),
+                    fieldWithPath("goal").description("도입 목적"),
+                    fieldWithPath("target_audience").description("대상"),
+                    fieldWithPath("concern").description("우려/제약").optional(),
+                    fieldWithPath("target_count").description("대상 인원수"),
+                    fieldWithPath("status").description("ACTIVE | ARCHIVED"),
+                    fieldWithPath("created_at").description("생성 시각"),
+                    fieldWithPath("updated_at").description("수정 시각"),
+                ),
+            ))
     }
 }
 ```
@@ -1448,14 +1590,25 @@ git commit -m "feat(adoption): create/list/get/update endpoints"
 
 ---
 
-### Task 2.4: M2 PR
+### Task 2.5: M2 PR
 
 - [ ] **Step 1: PR**
 
 ```bash
 git push -u origin feat/adoption-crud
-gh pr create --title "feat(M2): domain entities + Adoption CRUD" \
-  --body "8 JPA entities + 8 repositories + Adoption DTO/Service/Controller + GlobalExceptionHandler. AdoptionControllerTest 그린." 
+gh pr create --title "feat(M2): domain entities + Adoption CRUD + REST Docs infra" \
+  --body "$(cat <<'EOF'
+## Summary
+- 8 JPA entities + 8 repositories
+- ControllerTestBase + RequireDocumentationExtension (REST Docs 강제, ADR-0009)
+- Adoption DTO/Service/Controller + GlobalExceptionHandler
+- AdoptionControllerTest 그린 (documentApi 호출 포함)
+
+## Test plan
+- [x] \`./gradlew test\` — AdoptionControllerTest 그린
+- [x] \`./gradlew asciidoctor\` — build/asciidoc/html5/index.html 생성 확인
+EOF
+)"
 ```
 
 ---
@@ -3963,7 +4116,7 @@ curl -i -H "X-Admin-Key: $ADMIN_KEY" $ENDPOINT/api/admin/adoptions  # 200 [] (�
 
 | SPEC 6장 | 담당 Task |
 |---|---|
-| 6.1 도입 항목 관리 | M2 (Task 2.1-2.3) |
+| 6.1 도입 항목 관리 | M2 (Task 2.1, 2.2, 2.4) |
 | 6.2 AI 설문 초안 생성 | M4 (Task 4.1) |
 | 6.3 설문 발행 + 공개 링크 | M3 (Task 3.1), M5 (Task 5.1) |
 | 6.4 응답 집계 | M6 (Task 6.1) |
