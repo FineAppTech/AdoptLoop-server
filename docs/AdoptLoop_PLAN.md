@@ -132,6 +132,8 @@ deploy/
 
 ## Milestone 1 — Foundation (Day 1 AM, ~4-5h)
 
+> **REST Docs 정책 ([ADR-0009](adr/0009-spring-restdocs-enforcement.md))**: 컨트롤러 endpoint 테스트는 `ControllerTestBase`를 통해 `document()` 호출 필수. `ControllerTestBase` + JUnit Extension은 **M2 첫 컨트롤러 테스트 직전 Task에서 도입**. M1 Task 1.5 `AdminKeyFilterTest`는 필터 동작 테스트(컨트롤러 endpoint 아님)라 강제 대상에서 제외.
+
 ### Task 1.1: 의존성 추가
 
 **Files:**
@@ -146,6 +148,7 @@ plugins {
     kotlin("plugin.jpa") version "2.2.21"
     id("org.springframework.boot") version "4.0.6"
     id("io.spring.dependency-management") version "1.1.7"
+    id("org.asciidoctor.jvm.convert") version "4.0.4"
 }
 
 group = "com.tnear"
@@ -179,6 +182,7 @@ dependencies {
     developmentOnly("org.springframework.boot:spring-boot-docker-compose")
 
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
+    testImplementation("org.springframework.restdocs:spring-restdocs-mockmvc")
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.testcontainers:postgresql")
     testImplementation("org.testcontainers:junit-jupiter")
@@ -195,19 +199,31 @@ kotlin {
 }
 
 tasks.withType<Test> { useJUnitPlatform() }
+
+val snippetsDir = layout.buildDirectory.dir("generated-snippets")
+tasks.test { outputs.dir(snippetsDir) }
+tasks.asciidoctor {
+    inputs.dir(snippetsDir)
+    dependsOn(tasks.test)
+}
 ```
 
 - [ ] **Step 2: 의존성 해석 확인**
 
-Run: `./gradlew dependencies --configuration runtimeClasspath > /dev/null`
-Expected: 0 종료, Spring AI bedrock-converse 포함 확인.
+Run: `./gradlew dependencies --configuration testRuntimeClasspath > /dev/null`
+Expected: 0 종료, Spring AI bedrock-converse + spring-restdocs-mockmvc 포함 확인.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: asciidoctor 태스크 등록 확인**
+
+Run: `./gradlew tasks --group documentation`
+Expected: `asciidoctor` 태스크 출력. (src/docs/asciidoc/ 미존재 상태에서도 태스크 자체는 등록되어야 함.)
+
+- [ ] **Step 4: Commit**
 
 ```bash
 git checkout -b feat/foundation
 git add build.gradle.kts
-git commit -m "build: add JPA/Flyway/Thymeleaf/Spring AI/Testcontainers deps"
+git commit -m "build: add JPA/Flyway/Thymeleaf/Spring AI/Testcontainers/REST Docs deps + asciidoctor plugin"
 ```
 
 ---
