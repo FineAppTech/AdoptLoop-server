@@ -23,6 +23,9 @@ AdoptLoop는 설문 작성 → 발행 → 응답 수집 → LLM 분석 → Actio
 - 옛 ADR은 **수정/삭제하지 않는다**. 상태만 `Superseded by ADR-YYYY`로 갱신한다.
 - 인덱스 갱신: 새 ADR 추가 시 `docs/adr/README.md` 표에 한 줄 append 필수.
 
+## 개발 규칙
+- **테스트 강제**: 모든 컨트롤러 테스트는 Spring REST Docs `document()` 호출 필수. JUnit Extension이 미호출 시 fail. → [ADR-0009](adr/0009-spring-restdocs-enforcement.md)
+
 ## 현재 상태
 - 현재 milestone: M8.2 stub 채우기 직전
 - 다음 작업: M1 Foundation 구현 시작 (subagent-driven, milestone PR 분리)

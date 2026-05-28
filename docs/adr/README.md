@@ -13,3 +13,4 @@
 | [0006](0006-llm-call-outside-transaction-and-503-mapping.md) | LLM 호출 트랜잭션 분리 + 503 매핑 | Accepted | DB 커넥션 점유 방지, `LlmTransientException` 도입 |
 | [0007](0007-response-validation-policy.md) | 응답 검증 정책 | Accepted | required 누락 거부, `target_count*10` cap, 빈 TEXT 거부 |
 | [0008](0008-ecs-deployment-latest-tag-force-new.md) | ECS 배포 `:latest` + `force-new-deployment` | Accepted | 토이 우선 — production hygiene 의도적 보류 |
+| [0009](0009-spring-restdocs-enforcement.md) | Spring REST Docs 강제화 (JUnit Extension) | Accepted | 컨트롤러 테스트가 `document()` 호출 안 하면 fail, AsciiDoc + CI artifact |
