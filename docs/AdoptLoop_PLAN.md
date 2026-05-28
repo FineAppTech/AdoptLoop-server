@@ -3486,31 +3486,157 @@ git commit -m "test(e2e): full happy path adoption → action item"
 **Files:**
 - Create: `src/test/kotlin/com/tnear/adoptloop/e2e/EdgeCaseE2ETest.kt`
 
-> **TODO (2026-05-27 작성 예정)**: 아래 4개 테스트 본문(Kotlin 코드) — HappyPathE2ETest의 seed 헬퍼/mockChatOnce 패턴 재사용해서 채워넣을 것. PLAN 리뷰에서 (B)=① 결정됨.
-
 - [ ] **Step 1: 작성 — 핵심 케이스 4개**
 
 ```kotlin
 package com.tnear.adoptloop.e2e
 
-// ... (imports 동일)
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.ninja_squad.springmockk.MockkBean
+import com.tnear.adoptloop.IntegrationTestBase
+import com.tnear.adoptloop.domain.Admin
+import com.tnear.adoptloop.domain.repo.AdminRepository
+import io.mockk.every
+import io.mockk.mockk
+import org.junit.jupiter.api.Test
+import org.springframework.ai.chat.client.ChatClient
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
+import org.springframework.http.MediaType
+import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
+import java.security.MessageDigest
+import java.time.Instant
 
 @SpringBootTest
 @AutoConfigureMockMvc
 class EdgeCaseE2ETest @Autowired constructor(
     private val mvc: MockMvc,
     private val om: ObjectMapper,
-    // ... (위와 동일한 repos)
+    private val adminRepo: AdminRepository,
 ) : IntegrationTestBase() {
 
-    @Test fun `analysis before deadline returns 403`() { /* publish 후 즉시 analyses POST */ }
-    @Test fun `submit after deadline returns 403`() { /* 마감 직후 PUT answers */ }
-    @Test fun `wrong admin cannot read other admin's adoption`() { /* admin A 도입을 admin B 키로 GET → 403 */ }
-    @Test fun `replace questions on published survey returns 409`() { /* publish 후 PUT questions */ }
+    @MockkBean private lateinit var chatClient: ChatClient
+
+    @Test
+    fun `analysis before deadline returns 403`() {
+        val key = seedAdminKey()
+        val adoptionId = createAdoption(key)
+        // deadline을 멀리 두어 분석 요청 시점에 아직 미도래
+        val draft = createDraft(adoptionId, key, deadline = Instant.now().plusSeconds(3600))
+        publish(draft.surveyId, key)
+
+        // 액션: deadline 도래 전 분석 요청 → 403 (cohort 미확정)
+        mvc.perform(post("/api/admin/surveys/${draft.surveyId}/analyses").header("X-Admin-Key", key))
+            .andExpect(status().isForbidden)
+    }
+
+    @Test
+    fun `submit after deadline returns 403`() {
+        val key = seedAdminKey()
+        val adoptionId = createAdoption(key)
+        val draft = createDraft(adoptionId, key, deadline = Instant.now().plusSeconds(2))
+        publish(draft.surveyId, key)
+        val token = startResponse(draft.publicSlug)
+
+        // deadline 경과 대기
+        Thread.sleep(2500)
+
+        // 액션: 마감 후 응답 제출 → 403 (DEADLINE_EXCEEDED)
+        mvc.perform(put("/api/public/responses/$token/answers")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(om.writeValueAsString(listOf(mapOf(
+                "question_id" to draft.questionId, "text_value" to "late")))))
+            .andExpect(status().isForbidden)
+    }
+
+    @Test
+    fun `wrong admin cannot read other admin's adoption`() {
+        val keyA = seedAdminKey(name = "admin-A")
+        val keyB = seedAdminKey(name = "admin-B")
+        val adoptionId = createAdoption(keyA)
+
+        // 액션: admin B 키로 admin A의 도입 조회 → 403 (NOT_OWNER)
+        mvc.perform(get("/api/admin/adoptions/$adoptionId").header("X-Admin-Key", keyB))
+            .andExpect(status().isForbidden)
+    }
+
+    @Test
+    fun `replace questions on published survey returns 409`() {
+        val key = seedAdminKey()
+        val adoptionId = createAdoption(key)
+        val draft = createDraft(adoptionId, key, deadline = Instant.now().plusSeconds(3600))
+        publish(draft.surveyId, key)
+
+        // 액션: published 상태에서 questions 일괄 교체 시도 → 409 (SURVEY_NOT_EDITABLE)
+        mvc.perform(put("/api/admin/surveys/${draft.surveyId}/questions")
+            .header("X-Admin-Key", key)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(om.writeValueAsString(listOf(mapOf(
+                "type" to "TEXT", "text" to "new", "order_index" to 0, "required" to true)))))
+            .andExpect(status().isConflict)
+    }
+
+    // ──────── seed helpers (HappyPathE2ETest의 inline 시드 패턴을 명명 함수로 추출) ────────
+
+    private data class DraftCreated(val surveyId: Long, val questionId: Long, val publicSlug: String)
+
+    private fun seedAdminKey(name: String = "e2e"): String {
+        val raw = "k-${System.nanoTime()}-$name"
+        val hash = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+        adminRepo.save(Admin(name = name, keyHash = hash))
+        return raw
+    }
+
+    private fun createAdoption(key: String, targetCount: Int = 3): Long =
+        mvc.perform(post("/api/admin/adoptions").header("X-Admin-Key", key)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(om.writeValueAsString(mapOf(
+                "name" to "Jira", "goal" to "g", "target_audience" to "ta", "target_count" to targetCount))))
+            .andExpect(status().isCreated)
+            .andReturn().response.contentAsString.let { om.readTree(it)["id"].asLong() }
+
+    private fun createDraft(adoptionId: Long, key: String, deadline: Instant): DraftCreated {
+        mockChatOnce("""{"title":"S","questions":[{"type":"TEXT","text":"how"}]}""")
+        val json = mvc.perform(post("/api/admin/adoptions/$adoptionId/surveys")
+            .header("X-Admin-Key", key)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(om.writeValueAsString(mapOf("deadline" to deadline.toString()))))
+            .andExpect(status().isCreated)
+            .andReturn().response.contentAsString
+        val node = om.readTree(json)
+        return DraftCreated(
+            surveyId = node["survey"]["id"].asLong(),
+            questionId = node["questions"][0]["id"].asLong(),
+            publicSlug = node["survey"]["public_slug"].asText(),
+        )
+    }
+
+    private fun publish(surveyId: Long, key: String) {
+        mvc.perform(post("/api/admin/surveys/$surveyId/publish").header("X-Admin-Key", key))
+            .andExpect(status().isOk)
+    }
+
+    private fun startResponse(publicSlug: String): String =
+        mvc.perform(post("/api/public/surveys/$publicSlug/responses"))
+            .andExpect(status().isCreated)
+            .andReturn().response.contentAsString.let { om.readTree(it)["access_token"].asText() }
+
+    private fun mockChatOnce(content: String) {
+        val spec = mockk<ChatClient.ChatClientRequestSpec>(relaxed = true)
+        every { chatClient.prompt() } returns spec
+        every { spec.user(any<String>()) } returns spec
+        val call = mockk<ChatClient.CallResponseSpec>(relaxed = true)
+        every { spec.call() } returns call
+        every { call.content() } returns content
+    }
 }
 ```
 
-(각 테스트의 본문은 위 happy path와 같은 시드 헬퍼 + 단일 액션 + status 검증.)
+(각 테스트의 본문은 happy path와 같은 시드 패턴 + 단일 액션 + status 검증. 시드는 명명된 private 헬퍼로 추출하여 4개 테스트가 공유한다. 행위 검증은 HTTP status까지 (응답 본문의 `code` 문자열 매칭은 구현 후 별도 보강).)
 
 - [ ] **Step 2: 실행 + Commit**
 
