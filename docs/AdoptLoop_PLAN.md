@@ -2641,6 +2641,8 @@ gh pr create --title "feat(M5): public response flow + REST Docs" --body "토큰
 
 ## Milestone 6 — 집계 + AI 분석 + 액션 아이템 (Day 3 PM, ~4-5h)
 
+> **REST Docs 정책 ([ADR-0009](adr/0009-spring-restdocs-enforcement.md))**: M6는 `AnalysisController`와 `ActionItemController`를 신설한다. 두 컨트롤러의 endpoint 문서화는 새 Task 6.4(`AnalysisControllerTest` + `ActionItemControllerTest`)에서 happy path 1개씩 작성하며, 둘 다 `ControllerTestBase` 상속 + `documentApi(...)` 호출. `AggregateServiceTest`(Task 6.1)는 서비스 단위 테스트라 강제 대상에서 제외.
+
 ### Task 6.1: AggregateService (네이티브 SQL)
 
 **Files:**
@@ -3163,13 +3165,190 @@ class ActionItemController(
 }
 ```
 
-- [ ] **Step 2: Commit + M6 PR**
+- [ ] **Step 2: Commit**
 
 ```bash
 git add src/main/kotlin/com/tnear/adoptloop/actionitem
 git commit -m "feat(action-item): adopt + status update"
+```
+
+---
+
+### Task 6.4: Analysis/ActionItem 컨트롤러 테스트 (REST Docs)
+
+**Files:**
+- Create: `src/test/kotlin/com/tnear/adoptloop/analysis/AnalysisControllerTest.kt`
+- Create: `src/test/kotlin/com/tnear/adoptloop/actionitem/ActionItemControllerTest.kt`
+
+> ADR-0009 강제 대응. 각 컨트롤러당 가장 대표적인 endpoint 1개에 happy path 테스트 + `documentApi(...)`. LLM 호출이 없는 경로(aggregate, action-item adopt)를 우선 다뤄 테스트 비용을 낮춘다. 나머지 endpoint(`POST /analyses`, `GET /analyses/latest`, `PATCH /action-items/{id}`)는 M8 E2E에서 흐름으로 검증되며 추가 documentApi가 필요하면 후속 강화에서 보강한다.
+
+- [ ] **Step 1: AnalysisControllerTest — GET aggregate**
+
+```kotlin
+package com.tnear.adoptloop.analysis
+
+import com.tnear.adoptloop.ControllerTestBase
+import com.tnear.adoptloop.domain.*
+import com.tnear.adoptloop.domain.repo.*
+import com.tnear.adoptloop.restdocs.documentApi
+import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.restdocs.payload.PayloadDocumentation.fieldWithPath
+import org.springframework.restdocs.payload.PayloadDocumentation.responseFields
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
+import java.security.MessageDigest
+import java.time.Instant
+
+class AnalysisControllerTest @Autowired constructor(
+    private val adminRepo: AdminRepository,
+    private val adoptionRepo: AdoptionRepository,
+    private val surveyRepo: SurveyRepository,
+    private val questionRepo: QuestionRepository,
+    private val responseRepo: SurveyResponseRepository,
+    private val answerRepo: AnswerRepository,
+) : ControllerTestBase() {
+
+    @Test
+    fun `GET aggregate returns participation + per-question (SCALE)`() {
+        val (key, adminId) = seedAdmin()
+        val ad = adoptionRepo.save(Adoption(adminId, "n", "g", "ta", null, 10))
+        val s = surveyRepo.save(Survey(ad.id!!, "t", "slug-${System.nanoTime()}",
+            status = SurveyStatus.PUBLISHED, deadline = Instant.now().plusSeconds(60)))
+        val q = questionRepo.save(Question(s.id!!, QuestionType.SCALE, "Q", 1, true, Axis.USAGE))
+        listOf(3, 4, 5).forEach { v ->
+            val r = responseRepo.save(SurveyResponse(s.id!!, "tk${System.nanoTime()}",
+                status = ResponseStatus.SUBMITTED, submittedAt = Instant.now()))
+            answerRepo.save(Answer(r.id!!, q.id!!, scaleValue = v))
+        }
+
+        mvc.perform(get("/api/admin/surveys/${s.id}/aggregate")
+            .header("X-Admin-Key", key))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.participants").value(3))
+            .andDo(documentApi("get-survey-aggregate",
+                responseFields(
+                    fieldWithPath("participants").description("제출 완료 응답자 수"),
+                    fieldWithPath("target_count").description("도입 대상 인원수"),
+                    fieldWithPath("participation_rate").description("참여율 (0.0 ~ 1.0)"),
+                    fieldWithPath("per_question[].question_id").description("문항 ID"),
+                    fieldWithPath("per_question[].type").description("SCALE | SINGLE_CHOICE | TEXT"),
+                    fieldWithPath("per_question[].axis").description("축 (SCALE 한정)"),
+                    fieldWithPath("per_question[].average").description("평균 점수 (SCALE 한정)"),
+                    fieldWithPath("per_question[].count").description("응답 수 (SCALE 한정)"),
+                ),
+            ))
+    }
+
+    private fun seedAdmin(): Pair<String, Long> {
+        val raw = "k-${System.nanoTime()}"
+        val hash = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+        val saved = adminRepo.save(Admin(name = "t", keyHash = hash))
+        return raw to saved.id!!
+    }
+}
+```
+
+> 참고: `QuestionAggregateVo`는 sealed interface로 polymorphic. 테스트는 SCALE 시나리오만 다루어 SCALE subtype 필드만 문서화. SINGLE_CHOICE의 `distribution`, TEXT의 `values`는 향후 별도 happy path 테스트가 추가될 때 함께 문서화한다.
+
+- [ ] **Step 2: ActionItemControllerTest — POST adopt**
+
+```kotlin
+package com.tnear.adoptloop.actionitem
+
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.tnear.adoptloop.ControllerTestBase
+import com.tnear.adoptloop.domain.*
+import com.tnear.adoptloop.domain.repo.*
+import com.tnear.adoptloop.restdocs.documentApi
+import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.http.MediaType
+import org.springframework.restdocs.payload.PayloadDocumentation.fieldWithPath
+import org.springframework.restdocs.payload.PayloadDocumentation.requestFields
+import org.springframework.restdocs.payload.PayloadDocumentation.responseFields
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
+import java.security.MessageDigest
+import java.time.Instant
+
+class ActionItemControllerTest @Autowired constructor(
+    private val om: ObjectMapper,
+    private val adminRepo: AdminRepository,
+    private val adoptionRepo: AdoptionRepository,
+    private val surveyRepo: SurveyRepository,
+    private val analysisRepo: AnalysisRepository,
+) : ControllerTestBase() {
+
+    @Test
+    fun `POST adopts action items from analysis`() {
+        val (key, adminId) = seedAdmin()
+        val ad = adoptionRepo.save(Adoption(adminId, "n", "g", "ta", null, 10))
+        val s = surveyRepo.save(Survey(ad.id!!, "t", "slug-${System.nanoTime()}",
+            status = SurveyStatus.PUBLISHED, deadline = Instant.now().plusSeconds(60)))
+        val analysis = analysisRepo.save(Analysis(
+            surveyId = s.id!!,
+            adoptionScore = 70, usageScore = 60, behaviorScore = 65, valueScore = 80,
+            positiveSignals = listOf("A"), resistanceFactors = listOf("B"), risks = listOf("C"),
+            rawOutput = "{}",
+        ))
+
+        val body = listOf(mapOf(
+            "analysis_id" to analysis.id,
+            "title" to "사용성 가이드 작성",
+            "description" to "신규 사용자용 온보딩 가이드 페이지를 작성한다",
+            "priority" to "HIGH",
+        ))
+        mvc.perform(post("/api/admin/adoptions/${ad.id}/action-items")
+            .header("X-Admin-Key", key)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(om.writeValueAsString(body)))
+            .andExpect(status().isCreated)
+            .andExpect(jsonPath("$[0].status").value("TODO"))
+            .andDo(documentApi("adopt-action-items",
+                requestFields(
+                    fieldWithPath("[].analysis_id").description("출처 분석 ID"),
+                    fieldWithPath("[].title").description("액션 제목"),
+                    fieldWithPath("[].description").description("상세 설명").optional(),
+                    fieldWithPath("[].priority").description("HIGH | MEDIUM | LOW"),
+                ),
+                responseFields(
+                    fieldWithPath("[].id").description("액션 ID"),
+                    fieldWithPath("[].adoption_id").description("도입 ID"),
+                    fieldWithPath("[].analysis_id").description("출처 분석 ID"),
+                    fieldWithPath("[].title").description("액션 제목"),
+                    fieldWithPath("[].description").description("상세 설명").optional(),
+                    fieldWithPath("[].priority").description("HIGH | MEDIUM | LOW"),
+                    fieldWithPath("[].status").description("TODO | IN_PROGRESS | DONE"),
+                    fieldWithPath("[].created_at").description("생성 시각"),
+                    fieldWithPath("[].updated_at").description("수정 시각"),
+                ),
+            ))
+    }
+
+    private fun seedAdmin(): Pair<String, Long> {
+        val raw = "k-${System.nanoTime()}"
+        val hash = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+        val saved = adminRepo.save(Admin(name = "t", keyHash = hash))
+        return raw to saved.id!!
+    }
+}
+```
+
+- [ ] **Step 3: 테스트 실행 (PASS)**
+
+Run: `./gradlew test --tests AnalysisControllerTest --tests ActionItemControllerTest`
+Expected: 두 테스트 모두 PASS. asciidoctor 스니펫이 `build/generated-snippets/get-survey-aggregate/`와 `build/generated-snippets/adopt-action-items/`에 생성됨.
+
+- [ ] **Step 4: Commit + M6 PR**
+
+```bash
+git add src/test/kotlin/com/tnear/adoptloop/analysis src/test/kotlin/com/tnear/adoptloop/actionitem
+git commit -m "test(M6): AnalysisControllerTest + ActionItemControllerTest (REST Docs)"
 git push -u origin feat/analysis
-gh pr create --title "feat(M6): aggregate + AI analysis + action items" --body "집계 SELECT + Bedrock 분석 + 액션 아이템 채택/상태."
+gh pr create --title "feat(M6): aggregate + AI analysis + action items + REST Docs" --body "집계 SELECT + Bedrock 분석 + 액션 아이템 채택/상태. Analysis/ActionItem 컨트롤러 endpoint 테스트는 ControllerTestBase + documentApi (ADR-0009)."
 ```
 
 ---
