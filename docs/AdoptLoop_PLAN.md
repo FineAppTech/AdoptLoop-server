@@ -1615,6 +1615,8 @@ EOF
 
 ## Milestone 3 — Surveys: 편집·발행·Slack (Day 2 AM, ~4-5h)
 
+> **REST Docs 정책 ([ADR-0009](adr/0009-spring-restdocs-enforcement.md))**: M3의 컨트롤러 endpoint 테스트(`SurveyControllerTest`)는 M2 Task 2.3에서 도입된 `ControllerTestBase`를 상속하고 `documentApi(...)`로 문서 스니펫을 생성한다. 미호출 시 `RequireDocumentationExtension`이 fail.
+
 ### Task 3.1: SurveyService — 편집(PUT 전치환) + 발행
 
 **Files:**
@@ -1906,35 +1908,33 @@ class SurveyController(
 }
 ```
 
-- [ ] **Step 7: 통합 테스트**
+- [ ] **Step 7: 통합 테스트 (ControllerTestBase + documentApi)**
 
 ```kotlin
 package com.tnear.adoptloop.survey
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.tnear.adoptloop.IntegrationTestBase
+import com.tnear.adoptloop.ControllerTestBase
 import com.tnear.adoptloop.domain.*
 import com.tnear.adoptloop.domain.repo.*
+import com.tnear.adoptloop.restdocs.documentApi
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.http.MediaType
-import org.springframework.test.web.servlet.MockMvc
+import org.springframework.restdocs.payload.PayloadDocumentation.fieldWithPath
+import org.springframework.restdocs.payload.PayloadDocumentation.requestFields
+import org.springframework.restdocs.payload.PayloadDocumentation.responseFields
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 import java.security.MessageDigest
 import java.time.Instant
 
-@SpringBootTest
-@AutoConfigureMockMvc
 class SurveyControllerTest @Autowired constructor(
-    private val mvc: MockMvc,
     private val om: ObjectMapper,
     private val adminRepo: AdminRepository,
     private val adoptionRepo: AdoptionRepository,
     private val surveyRepo: SurveyRepository,
-) : IntegrationTestBase() {
+) : ControllerTestBase() {
 
     @Test
     fun `publish empty draft is rejected with 409`() {
@@ -1945,6 +1945,7 @@ class SurveyControllerTest @Autowired constructor(
         mvc.perform(post("/api/admin/surveys/${draft.id}/publish")
             .header("X-Admin-Key", key))
             .andExpect(status().isConflict)
+            .andDo(documentApi("publish-survey-empty-draft-conflict"))
     }
 
     @Test
@@ -1963,6 +1964,31 @@ class SurveyControllerTest @Autowired constructor(
             .content(om.writeValueAsString(body)))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.questions.length()").value(2))
+            .andDo(documentApi("replace-survey-questions",
+                requestFields(
+                    fieldWithPath("[].type").description("문항 타입 (TEXT | SINGLE_CHOICE | SCALE)"),
+                    fieldWithPath("[].text").description("문항 본문"),
+                    fieldWithPath("[].order_index").description("표시 순서"),
+                    fieldWithPath("[].axis").description("축 (USAGE | BEHAVIOR | VALUE) — SCALE 한정").optional(),
+                ),
+                responseFields(
+                    fieldWithPath("survey.id").description("설문 ID"),
+                    fieldWithPath("survey.adoption_id").description("도입 ID"),
+                    fieldWithPath("survey.title").description("설문 제목"),
+                    fieldWithPath("survey.public_slug").description("공개 URL slug"),
+                    fieldWithPath("survey.status").description("DRAFT | PUBLISHED | CLOSED"),
+                    fieldWithPath("survey.deadline").description("응답 마감 시각"),
+                    fieldWithPath("survey.published_at").description("발행 시각").optional(),
+                    fieldWithPath("survey.created_at").description("생성 시각"),
+                    fieldWithPath("questions[].id").description("문항 ID"),
+                    fieldWithPath("questions[].type").description("문항 타입"),
+                    fieldWithPath("questions[].text").description("문항 본문"),
+                    fieldWithPath("questions[].order_index").description("표시 순서"),
+                    fieldWithPath("questions[].required").description("필수 응답 여부"),
+                    fieldWithPath("questions[].axis").description("축 (SCALE 한정)").optional(),
+                    fieldWithPath("questions[].options").description("선택지 목록 (SINGLE_CHOICE 한정)"),
+                ),
+            ))
     }
 
     private fun seedAdmin(): Pair<String, Long> {
@@ -1975,6 +2001,8 @@ class SurveyControllerTest @Autowired constructor(
 }
 ```
 
+> 두 테스트 모두 컨트롤러 endpoint 테스트이므로 `documentApi(...)` 호출 필수 (ADR-0009). 409 에러 케이스는 스니펫 없이 식별자만 — 기본 http-request/http-response 스니펫 생성으로 tracker 만족. PUT happy path는 요청/응답 필드 스니펫 작성.
+
 - [ ] **Step 8: 테스트 실행 (PASS)**
 
 Run: `./gradlew test --tests SurveyControllerTest`
@@ -1984,14 +2012,14 @@ Expected: PASS.
 
 ```bash
 git add src/main/kotlin/com/tnear/adoptloop/survey src/test/kotlin/com/tnear/adoptloop/survey
-git commit -m "feat(survey): edit (PUT replace) + publish + Slack TX-after-commit"
+git commit -m "feat(survey): edit (PUT replace) + publish + Slack TX-after-commit + REST Docs"
 ```
 
 - [ ] **Step 10: M3 PR**
 
 ```bash
 git push -u origin feat/surveys
-gh pr create --title "feat(M3): surveys edit/publish + Slack notifier" --body "PUT 전치환 + 발행 시 Slack send-after-commit. 빈 draft 발행 409 / 질문 교체 그린."
+gh pr create --title "feat(M3): surveys edit/publish + Slack notifier + REST Docs" --body "PUT 전치환 + 발행 시 Slack send-after-commit. 빈 draft 발행 409 / 질문 교체 그린. SurveyControllerTest는 ControllerTestBase 상속 + documentApi 호출 (ADR-0009)."
 ```
 
 ---
