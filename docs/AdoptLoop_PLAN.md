@@ -2026,6 +2026,8 @@ gh pr create --title "feat(M3): surveys edit/publish + Slack notifier + REST Doc
 
 ## Milestone 4 — AI 설문 초안 (Day 2 PM, ~4-5h)
 
+> **REST Docs 정책 ([ADR-0009](adr/0009-spring-restdocs-enforcement.md))**: `SurveyDraftServiceTest`도 컨트롤러 endpoint(`POST /api/admin/adoptions/{id}/surveys`)를 호출하므로 `ControllerTestBase` 상속 + `documentApi(...)` 호출 필수.
+
 ### Task 4.1: SurveyDraftPrompt + Parser + Service
 
 **Files:**
@@ -2200,37 +2202,36 @@ fun generateDraft(@PathVariable adoptionId: Long, @Valid @RequestBody req: Surve
 
 생성자에 `private val draftService: com.tnear.adoptloop.survey.draft.SurveyDraftService` 추가.
 
-- [ ] **Step 7: 테스트 — ChatClient mock**
+- [ ] **Step 7: 테스트 — ChatClient mock (ControllerTestBase + documentApi)**
 
 ```kotlin
 package com.tnear.adoptloop.survey
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.tnear.adoptloop.IntegrationTestBase
+import com.ninja_squad.springmockk.MockkBean
+import com.tnear.adoptloop.ControllerTestBase
 import com.tnear.adoptloop.domain.*
 import com.tnear.adoptloop.domain.repo.*
-import com.tnear.adoptloop.survey.draft.SurveyDraftService
-import com.ninja_squad.springmockk.MockkBean
+import com.tnear.adoptloop.restdocs.documentApi
 import io.mockk.every
+import io.mockk.mockk
 import org.junit.jupiter.api.Test
 import org.springframework.ai.chat.client.ChatClient
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
-import org.springframework.test.web.servlet.MockMvc
+import org.springframework.http.MediaType
+import org.springframework.restdocs.payload.PayloadDocumentation.fieldWithPath
+import org.springframework.restdocs.payload.PayloadDocumentation.requestFields
+import org.springframework.restdocs.payload.PayloadDocumentation.responseFields
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 import java.security.MessageDigest
-import kotlin.test.assertTrue
+import java.time.Instant
 
-@SpringBootTest
-@AutoConfigureMockMvc
 class SurveyDraftServiceTest @Autowired constructor(
-    private val mvc: MockMvc,
+    private val om: ObjectMapper,
     private val adminRepo: AdminRepository,
     private val adoptionRepo: AdoptionRepository,
-    private val draftService: SurveyDraftService,
-) : IntegrationTestBase() {
+) : ControllerTestBase() {
 
     @MockkBean private lateinit var chatClient: ChatClient
 
@@ -2251,10 +2252,34 @@ class SurveyDraftServiceTest @Autowired constructor(
         mvc.perform(post("/api/admin/adoptions/${adoption.id}/surveys")
             .header("X-Admin-Key", key)
             .contentType(MediaType.APPLICATION_JSON)
-            .content(om.writeValueAsString(mapOf("deadline" to java.time.Instant.now().plusSeconds(3600).toString()))))
+            .content(om.writeValueAsString(mapOf("deadline" to Instant.now().plusSeconds(3600).toString()))))
             .andExpect(status().isCreated)
             .andExpect(jsonPath("$.survey.title").value("Jira 설문"))
             .andExpect(jsonPath("$.questions.length()").value(2))
+            .andDo(documentApi("generate-survey-draft",
+                requestFields(
+                    fieldWithPath("deadline").description("응답 마감 시각 (ISO-8601)"),
+                ),
+                responseFields(
+                    fieldWithPath("survey.id").description("설문 ID"),
+                    fieldWithPath("survey.adoption_id").description("도입 ID"),
+                    fieldWithPath("survey.title").description("LLM이 생성한 설문 제목"),
+                    fieldWithPath("survey.public_slug").description("공개 URL slug"),
+                    fieldWithPath("survey.status").description("DRAFT | PUBLISHED | CLOSED"),
+                    fieldWithPath("survey.deadline").description("응답 마감 시각"),
+                    fieldWithPath("survey.published_at").description("발행 시각").optional(),
+                    fieldWithPath("survey.created_at").description("생성 시각"),
+                    fieldWithPath("questions[].id").description("문항 ID"),
+                    fieldWithPath("questions[].type").description("문항 타입 (TEXT | SINGLE_CHOICE | SCALE)"),
+                    fieldWithPath("questions[].text").description("문항 본문"),
+                    fieldWithPath("questions[].order_index").description("표시 순서"),
+                    fieldWithPath("questions[].required").description("필수 응답 여부"),
+                    fieldWithPath("questions[].axis").description("축 (SCALE 한정)").optional(),
+                    fieldWithPath("questions[].options[].id").description("선택지 ID").optional(),
+                    fieldWithPath("questions[].options[].text").description("선택지 본문").optional(),
+                    fieldWithPath("questions[].options[].order_index").description("선택지 순서").optional(),
+                ),
+            ))
     }
 
     private fun seedAdmin(): Pair<String, Long> {
@@ -2276,9 +2301,9 @@ Expected: PASS.
 
 ```bash
 git add src/main/kotlin/com/tnear/adoptloop src/test/kotlin/com/tnear/adoptloop/survey
-git commit -m "feat(M4): AI survey draft generation via Bedrock Converse"
+git commit -m "feat(M4): AI survey draft generation via Bedrock Converse + REST Docs"
 git push -u origin feat/ai-draft
-gh pr create --title "feat(M4): AI survey draft generation" --body "Bedrock Converse + JSON 파싱 + draft + 질문 일괄 저장."
+gh pr create --title "feat(M4): AI survey draft generation + REST Docs" --body "Bedrock Converse + JSON 파싱 + draft + 질문 일괄 저장. SurveyDraftServiceTest는 ControllerTestBase + documentApi (ADR-0009)."
 ```
 
 ---
