@@ -119,14 +119,20 @@ paths:
       tags: [surveys]
       summary: AI 설문 초안 생성 (Step 3)
       description: |
-        Bedrock 호출로 문항 JSON을 생성하고 `surveys('draft') + questions + question_options`를
-        한 트랜잭션으로 저장한다. 응답은 생성된 survey 전체.
+        Bedrock 호출로 문항 JSON을 생성하고 `surveys('DRAFT') + questions + question_options`를
+        한 트랜잭션으로 저장한다. 응답은 생성된 survey 전체. `deadline`은 draft 생성 시점에 확정한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SurveyDraft' }
       responses:
         '201':
           description: Created
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SurveyDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
         '502':
           description: Bedrock 호출 실패
@@ -156,7 +162,7 @@ paths:
       summary: 문항 일괄 교체 (Step 4 편집)
       description: |
         기존 questions/question_options를 전치환한다 (DELETE → INSERT).
-        `status='draft'`인 설문에서만 허용. 발행 후 호출 시 `409`.
+        `status='DRAFT'`인 설문에서만 허용. 발행 후 호출 시 `409`.
       requestBody:
         required: true
         content:
@@ -179,13 +185,9 @@ paths:
       tags: [surveys]
       summary: 설문 발행 (Step 4)
       description: |
-        `status='published'`, `deadline` 확정, 옵션으로 `slack_webhook_url` 저장.
-        커밋 성공 후 Slack 발행 알림 단발 POST(send-after-commit).
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/SurveyPublish' }
+        `status='PUBLISHED'` 전환. `deadline`은 DRAFT 생성 시 확정됐으므로 변경하지 않는다.
+        커밋 성공 후 서버 config(`adoptloop.slack.webhook-url`)에 설정된 채널로 단발 POST(send-after-commit).
+        요청 본문 없음.
       responses:
         '200':
           description: OK
@@ -193,7 +195,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Survey' }
         '409':
-          description: 이미 published이거나 questions가 0개
+          description: "이미 published, questions가 0개, 또는 deadline이 이미 경과"
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -361,7 +363,7 @@ paths:
       tags: [public-survey]
       summary: 설문 시작 — access_token 발급 (Step 5 upfront)
       description: |
-        `survey_responses(status='in_progress')` INSERT 후 `access_token` 반환.
+        `survey_responses(status='IN_PROGRESS')` INSERT 후 `access_token` 반환.
         클라이언트는 토큰을 `localStorage`에 저장하고 이후 호출에 사용.
       security: []
       responses:
@@ -500,7 +502,7 @@ components:
         target_audience: { type: string }
         concern: { type: string, nullable: true }
         target_count: { type: integer, minimum: 1 }
-        status: { type: string, enum: [active, archived] }
+        status: { type: string, enum: [ACTIVE, ARCHIVED] }
     Adoption:
       type: object
       required: [id, admin_id, name, status, target_count, created_at]
@@ -512,7 +514,7 @@ components:
         target_audience: { type: string }
         concern: { type: string, nullable: true }
         target_count: { type: integer }
-        status: { type: string, enum: [active, archived] }
+        status: { type: string, enum: [ACTIVE, ARCHIVED] }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     AdoptionDetail:
@@ -530,15 +532,14 @@ components:
     # ── Survey / Question / Option
     Survey:
       type: object
-      required: [id, adoption_id, title, status, public_slug, created_at]
+      required: [id, adoption_id, title, status, public_slug, deadline, created_at]
       properties:
         id: { type: integer, format: int64 }
         adoption_id: { type: integer, format: int64 }
         title: { type: string }
         public_slug: { type: string }
-        status: { type: string, enum: [draft, published] }
-        deadline: { type: string, format: date-time, nullable: true }
-        slack_webhook_url: { type: string, nullable: true }
+        status: { type: string, enum: [DRAFT, PUBLISHED, CLOSED] }
+        deadline: { type: string, format: date-time }
         published_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
     SurveyDetail:
@@ -549,25 +550,24 @@ components:
             questions:
               type: array
               items: { $ref: '#/components/schemas/Question' }
-    SurveyPublish:
+    SurveyDraft:
       type: object
       required: [deadline]
       properties:
-        deadline: { type: string, format: date-time }
-        slack_webhook_url: { type: string, nullable: true }
+        deadline: { type: string, format: date-time, description: draft 생성 시점에 확정. 발행 시 변경되지 않음. }
 
     Question:
       type: object
       required: [id, type, text, order_index, required]
       properties:
         id: { type: integer, format: int64 }
-        type: { type: string, enum: [text, single_choice, scale] }
+        type: { type: string, enum: [TEXT, SINGLE_CHOICE, SCALE] }
         text: { type: string }
         order_index: { type: integer }
         required: { type: boolean }
         axis:
           type: string
-          enum: [usage, behavior, value]
+          enum: [USAGE, BEHAVIOR, VALUE]
           nullable: true
           description: scale 문항에만 의미
         options:
@@ -577,11 +577,11 @@ components:
       type: object
       required: [type, text, order_index]
       properties:
-        type: { type: string, enum: [text, single_choice, scale] }
+        type: { type: string, enum: [TEXT, SINGLE_CHOICE, SCALE] }
         text: { type: string }
         order_index: { type: integer }
         required: { type: boolean, default: true }
-        axis: { type: string, enum: [usage, behavior, value], nullable: true }
+        axis: { type: string, enum: [USAGE, BEHAVIOR, VALUE], nullable: true }
         options:
           type: array
           description: single_choice일 때만
@@ -621,7 +621,7 @@ components:
       required: [question_id, type, distribution]
       properties:
         question_id: { type: integer, format: int64 }
-        type: { type: string, enum: [single_choice] }
+        type: { type: string, enum: [SINGLE_CHOICE] }
         distribution:
           type: array
           items:
@@ -635,7 +635,7 @@ components:
       required: [question_id, type, average, count]
       properties:
         question_id: { type: integer, format: int64 }
-        type: { type: string, enum: [scale] }
+        type: { type: string, enum: [SCALE] }
         axis: { type: string, enum: [usage, behavior, value] }
         average: { type: number, format: float }
         count: { type: integer }
@@ -644,7 +644,7 @@ components:
       required: [question_id, type, values]
       properties:
         question_id: { type: integer, format: int64 }
-        type: { type: string, enum: [text] }
+        type: { type: string, enum: [TEXT] }
         values:
           type: array
           items: { type: string }
@@ -699,7 +699,7 @@ components:
             properties:
               title: { type: string }
               description: { type: string, nullable: true }
-              priority: { type: string, enum: [high, medium, low] }
+              priority: { type: string, enum: [HIGH, MEDIUM, LOW] }
 
     # ── Action items
     ActionItem:
@@ -711,8 +711,8 @@ components:
         analysis_id: { type: integer, format: int64 }
         title: { type: string }
         description: { type: string, nullable: true }
-        priority: { type: string, enum: [high, medium, low] }
-        status: { type: string, enum: [todo, in_progress, done] }
+        priority: { type: string, enum: [HIGH, MEDIUM, LOW] }
+        status: { type: string, enum: [TODO, IN_PROGRESS, DONE] }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     ActionItemCreate:
@@ -722,11 +722,11 @@ components:
         analysis_id: { type: integer, format: int64 }
         title: { type: string }
         description: { type: string, nullable: true }
-        priority: { type: string, enum: [high, medium, low] }
+        priority: { type: string, enum: [HIGH, MEDIUM, LOW] }
     ActionItemUpdate:
       type: object
       properties:
-        status: { type: string, enum: [todo, in_progress, done] }
+        status: { type: string, enum: [TODO, IN_PROGRESS, DONE] }
 
     # ── Public (응답자)
     PublicSurvey:
@@ -748,7 +748,7 @@ components:
       required: [survey, status, answers]
       properties:
         survey: { $ref: '#/components/schemas/PublicSurvey' }
-        status: { type: string, enum: [in_progress, submitted] }
+        status: { type: string, enum: [IN_PROGRESS, SUBMITTED] }
         submitted_at: { type: string, format: date-time, nullable: true }
         answers:
           type: array
