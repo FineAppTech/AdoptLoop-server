@@ -2310,6 +2310,8 @@ gh pr create --title "feat(M4): AI survey draft generation + REST Docs" --body "
 
 ## Milestone 5 — 응답자 공개 API (Day 3 AM, ~3-4h)
 
+> **REST Docs 정책 ([ADR-0009](adr/0009-spring-restdocs-enforcement.md))**: `PublicSurveyControllerTest`는 `/api/public/*` 컨트롤러 endpoint를 호출하므로 `ControllerTestBase` 상속 + 각 `mvc.perform(...)` 호출에 `documentApi(...)` 필수.
+
 ### Task 5.1: PublicSurveyController + ResponseService (TDD)
 
 **Files:**
@@ -2513,35 +2515,33 @@ class PublicSurveyController(
 }
 ```
 
-- [ ] **Step 5: 통합 테스트 (happy + token/마감 edge)**
+- [ ] **Step 5: 통합 테스트 (happy + token/마감 edge) — ControllerTestBase + documentApi**
 
 ```kotlin
 package com.tnear.adoptloop.publicapi
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.tnear.adoptloop.IntegrationTestBase
+import com.tnear.adoptloop.ControllerTestBase
 import com.tnear.adoptloop.domain.*
 import com.tnear.adoptloop.domain.repo.*
+import com.tnear.adoptloop.restdocs.documentApi
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.http.MediaType
-import org.springframework.test.web.servlet.MockMvc
+import org.springframework.restdocs.payload.PayloadDocumentation.fieldWithPath
+import org.springframework.restdocs.payload.PayloadDocumentation.requestFields
+import org.springframework.restdocs.payload.PayloadDocumentation.responseFields
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 import java.time.Instant
 
-@SpringBootTest
-@AutoConfigureMockMvc
 class PublicSurveyControllerTest @Autowired constructor(
-    private val mvc: MockMvc,
     private val om: ObjectMapper,
     private val adoptionRepo: AdoptionRepository,
     private val adminRepo: AdminRepository,
     private val surveyRepo: SurveyRepository,
     private val questionRepo: QuestionRepository,
-) : IntegrationTestBase() {
+) : ControllerTestBase() {
 
     @Test
     fun `start → submit → reload returns submitted answers`() {
@@ -2549,6 +2549,11 @@ class PublicSurveyControllerTest @Autowired constructor(
         // 1. start
         val tokenJson = mvc.perform(post("/api/public/surveys/${s.publicSlug}/responses"))
             .andExpect(status().isCreated)
+            .andDo(documentApi("start-public-response",
+                responseFields(
+                    fieldWithPath("access_token").description("응답 토큰 (이후 답변 PUT/GET에 사용)"),
+                ),
+            ))
             .andReturn().response.contentAsString
         val token = om.readTree(tokenJson)["access_token"].asText()
 
@@ -2561,6 +2566,31 @@ class PublicSurveyControllerTest @Autowired constructor(
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.status").value("SUBMITTED"))
             .andExpect(jsonPath("$.answers[0].text_value").value("good"))
+            .andDo(documentApi("submit-public-response",
+                requestFields(
+                    fieldWithPath("[].question_id").description("문항 ID"),
+                    fieldWithPath("[].text_value").description("주관식 답변 (TEXT 한정)").optional(),
+                    fieldWithPath("[].question_option_id").description("선택지 ID (SINGLE_CHOICE 한정)").optional(),
+                    fieldWithPath("[].scale_value").description("척도 점수 1-5 (SCALE 한정)").optional(),
+                ),
+                responseFields(
+                    fieldWithPath("survey.title").description("설문 제목"),
+                    fieldWithPath("survey.deadline").description("응답 마감 시각"),
+                    fieldWithPath("survey.questions[].id").description("문항 ID"),
+                    fieldWithPath("survey.questions[].type").description("문항 타입"),
+                    fieldWithPath("survey.questions[].text").description("문항 본문"),
+                    fieldWithPath("survey.questions[].order_index").description("표시 순서"),
+                    fieldWithPath("survey.questions[].required").description("필수 응답 여부"),
+                    fieldWithPath("survey.questions[].axis").description("축 (SCALE 한정)").optional(),
+                    fieldWithPath("survey.questions[].options").description("선택지 목록 (SINGLE_CHOICE 한정)"),
+                    fieldWithPath("status").description("IN_PROGRESS | SUBMITTED"),
+                    fieldWithPath("submitted_at").description("제출 시각").optional(),
+                    fieldWithPath("answers[].question_id").description("문항 ID"),
+                    fieldWithPath("answers[].text_value").description("주관식 답변").optional(),
+                    fieldWithPath("answers[].question_option_id").description("선택지 ID").optional(),
+                    fieldWithPath("answers[].scale_value").description("척도 점수").optional(),
+                ),
+            ))
     }
 
     @Test
@@ -2569,6 +2599,7 @@ class PublicSurveyControllerTest @Autowired constructor(
             .contentType(MediaType.APPLICATION_JSON)
             .content("[]"))
             .andExpect(status().isUnauthorized)
+            .andDo(documentApi("submit-public-response-invalid-token"))
     }
 
     @Test
@@ -2576,6 +2607,7 @@ class PublicSurveyControllerTest @Autowired constructor(
         val s = seedPublishedSurveyWithTextQuestion(deadline = Instant.now().minusSeconds(60))
         mvc.perform(get("/api/public/surveys/${s.publicSlug}"))
             .andExpect(status().isGone)
+            .andDo(documentApi("get-public-survey-deadline-passed"))
     }
 
     private fun seedPublishedSurveyWithTextQuestion(deadline: Instant = Instant.now().plusSeconds(3600)): Survey {
@@ -2589,6 +2621,8 @@ class PublicSurveyControllerTest @Autowired constructor(
 }
 ```
 
+> 첫 테스트는 두 endpoint(start, submit)를 순차 호출하므로 각각의 `mvc.perform(...)`에 `documentApi(...)` 부착. 에러 케이스 두 개(401/410)는 식별자만 — 기본 http-request/response 스니펫으로 tracker 만족.
+
 - [ ] **Step 6: 테스트 실행 (PASS)**
 
 Run: `./gradlew test --tests PublicSurveyControllerTest`
@@ -2598,9 +2632,9 @@ Expected: 3개 모두 PASS.
 
 ```bash
 git add src/main/kotlin/com/tnear/adoptloop/publicapi src/test/kotlin/com/tnear/adoptloop/publicapi
-git commit -m "feat(M5): public response API (token, deadline, PUT replace)"
+git commit -m "feat(M5): public response API (token, deadline, PUT replace) + REST Docs"
 git push -u origin feat/public-api
-gh pr create --title "feat(M5): public response flow" --body "토큰 발급 → 응답 PUT 전치환 → 재로드. 토큰/마감 음성 케이스 포함."
+gh pr create --title "feat(M5): public response flow + REST Docs" --body "토큰 발급 → 응답 PUT 전치환 → 재로드. 토큰/마감 음성 케이스 포함. PublicSurveyControllerTest는 ControllerTestBase + documentApi (ADR-0009)."
 ```
 
 ---
