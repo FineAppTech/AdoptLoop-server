@@ -1,0 +1,13 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: adoptloop
+      POSTGRES_USER: adoptloop
+      POSTGRES_PASSWORD: adoptloop
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U adoptloop"]
+      interval: 5s
+      retries: 10
