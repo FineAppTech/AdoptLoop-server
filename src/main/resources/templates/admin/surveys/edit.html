@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <title>설문 편집</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.indigo.min.css">
+  <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body>
+<header class="container">
+  <nav>
+    <ul><li><strong>AdoptLoop</strong></li></ul>
+    <ul><li><a href="/admin/adoptions">도입 항목</a></li></ul>
+  </nav>
+</header>
+<main class="container">
+  <hgroup>
+    <h1 id="title">설문 편집</h1>
+    <p>상태: <span id="status"></span> · 마감: <span id="deadline"></span></p>
+  </hgroup>
+  <div id="questions"></div>
+  <button id="addQ" type="button" class="secondary">+ 문항 추가</button>
+  <hr>
+  <div role="group">
+    <button id="save" type="button">문항 저장</button>
+    <button id="publish" type="button">발행</button>
+    <button id="toAnalyze" type="button" class="outline">분석 페이지 →</button>
+  </div>
+</main>
+<script src="/js/admin-common.js"></script>
+<script>
+const id = location.pathname.split('/')[3];   // /admin/surveys/{id}/edit
+let questions = [];
+
+function render() {
+  const c = document.getElementById('questions');
+  c.innerHTML = '';
+  questions.forEach((q, i) => {
+    const div = document.createElement('div');
+    div.innerHTML = `
+      <article>
+        <label>문항 ${i + 1}
+          <input data-i="${i}" data-f="text" value="${q.text ?? ''}">
+        </label>
+        <select data-i="${i}" data-f="type">
+          ${['TEXT', 'SCALE', 'SINGLE_CHOICE'].map(t => `<option ${q.type === t ? 'selected' : ''}>${t}</option>`).join('')}
+        </select>
+        ${q.type === 'SCALE' ? `<select data-i="${i}" data-f="axis">
+          ${['USAGE', 'BEHAVIOR', 'VALUE'].map(a => `<option ${q.axis === a ? 'selected' : ''}>${a}</option>`).join('')}
+        </select>` : ''}
+        ${q.type === 'SINGLE_CHOICE' ? `<label>옵션 (쉼표로 구분)
+          <input data-i="${i}" data-f="optsText" value="${(q.options || []).map(o => o.text).join(',')}">
+        </label>` : ''}
+        <button data-i="${i}" data-act="del" type="button" class="secondary outline">삭제</button>
+      </article>`;
+    c.appendChild(div);
+  });
+}
+
+function bindEvents() {
+  const container = document.getElementById('questions');
+  container.addEventListener('input', e => {
+    const i = +e.target.dataset.i, f = e.target.dataset.f;
+    if (!f) return;
+    if (f === 'optsText') {
+      questions[i].options = e.target.value.split(',').map((t, k) => ({ text: t.trim(), order_index: k + 1 }));
+    } else {
+      questions[i][f] = e.target.value;
+    }
+  });
+  // 타입을 바꾸면 의존 입력(axis/옵션)을 다시 그린다.
+  container.addEventListener('change', e => {
+    if (e.target.dataset.f === 'type') {
+      questions[+e.target.dataset.i].type = e.target.value;
+      render();
+    }
+  });
+  container.addEventListener('click', e => {
+    if (e.target.dataset.act === 'del') {
+      questions.splice(+e.target.dataset.i, 1);
+      render();
+    }
+  });
+}
+
+document.getElementById('addQ').onclick = () => {
+  questions.push({ type: 'SCALE', text: '', order_index: questions.length + 1, required: true, axis: 'USAGE', options: [] });
+  render();
+};
+
+document.getElementById('save').onclick = async () => {
+  const payload = questions.map((q, i) => ({
+    type: q.type, text: q.text, order_index: i + 1, required: true,
+    axis: q.type === 'SCALE' ? q.axis : null,
+    options: q.type === 'SINGLE_CHOICE' ? (q.options || []) : [],
+  }));
+  const r = await authFetch(`/api/admin/surveys/${id}/questions`, { method: 'PUT', body: payload });
+  alert(r.ok ? '저장됨' : `오류: ${r.status}`);
+};
+
+document.getElementById('publish').onclick = async () => {
+  if (!confirm('발행하시겠어요?')) return;
+  const r = await authFetch(`/api/admin/surveys/${id}/publish`, { method: 'POST' });
+  if (r.ok) {
+    const survey = await r.json();
+    alert(`발행 완료. 공개 링크: /s/${survey.public_slug}`);
+    location.href = `/admin/adoptions/${survey.adoption_id}`;
+  } else {
+    alert(`오류: ${r.status}`);
+  }
+};
+
+document.getElementById('toAnalyze').onclick = () => {
+  location.href = `/admin/surveys/${id}/analyze`;
+};
+
+authFetch(`/api/admin/surveys/${id}`).then(r => r.json()).then(d => {
+  document.getElementById('title').textContent = d.survey.title;
+  document.getElementById('status').textContent = d.survey.status;
+  document.getElementById('deadline').textContent = d.survey.deadline;
+  questions = d.questions;
+  render();
+  bindEvents();
+});
+</script>
+</body>
+</html>

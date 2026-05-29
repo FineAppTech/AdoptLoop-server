@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <title>도입 항목</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.indigo.min.css">
+  <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body>
+<header class="container">
+  <nav>
+    <ul><li><strong>AdoptLoop</strong></li></ul>
+    <ul><li><a href="/admin/adoptions">도입 항목</a></li></ul>
+  </nav>
+</header>
+<main class="container">
+  <hgroup>
+    <h1>도입 항목</h1>
+    <p>진행 중인 솔루션 도입을 관리합니다</p>
+  </hgroup>
+  <p><a href="/admin/adoptions/new" role="button">+ 새로 만들기</a></p>
+  <table id="t">
+    <thead><tr><th>이름</th><th>대상 인원</th><th>상태</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</main>
+<script src="/js/admin-common.js"></script>
+<script>
+authFetch('/api/admin/adoptions').then(r => r.json()).then(rows => {
+  const tb = document.querySelector('#t tbody');
+  rows.forEach(row => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td><a href="/admin/adoptions/${row.id}">${row.name}</a></td>` +
+      `<td>${row.target_count}</td><td>${row.status}</td>`;
+    tb.appendChild(tr);
+  });
+});
+</script>
+</body>
+</html>

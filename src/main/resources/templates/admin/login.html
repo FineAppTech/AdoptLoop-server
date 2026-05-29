@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <title>로그인</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.indigo.min.css">
+  <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body>
+<main class="container narrow">
+  <hgroup>
+    <h1>AdoptLoop</h1>
+    <p>Admin Key를 입력하세요</p>
+  </hgroup>
+  <input id="key" type="password" autofocus placeholder="Admin Key">
+  <button onclick="save()">저장</button>
+</main>
+<script>
+  function save() {
+    const k = document.getElementById('key').value.trim();
+    if (!k) return;
+    localStorage.setItem('admin_key', k);
+    location.href = '/admin/adoptions';
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+/* Pico(인디고 / 라이트) 위에 얹는 소량 오버라이드만 둔다. 베이스 스타일은 Pico가 담당. */
+
+/* 로그인 화면은 좁게 가운데로 */
+.narrow {
+  max-width: 28rem;
+  margin-block: 12vh;
+}
+
+/* 상단 브랜드 강조 */
+header.container nav strong {
+  font-size: 1.05rem;
+  letter-spacing: .01em;
+}
+
+/* 분석 점수 표: 라벨 열 폭 고정 */
+#scores th {
+  width: 8rem;
+}
+
+/* 제안 액션 목록: 기본 불릿 제거하고 항목 간 간격 */
+#suggested {
+  list-style: none;
+  padding-left: 0;
+}
+#suggested li {
+  margin-block: .4rem;
+}

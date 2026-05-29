@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <title>새 도입 항목</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.indigo.min.css">
+  <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body>
+<header class="container">
+  <nav>
+    <ul><li><strong>AdoptLoop</strong></li></ul>
+    <ul><li><a href="/admin/adoptions">도입 항목</a></li></ul>
+  </nav>
+</header>
+<main class="container">
+  <h1>새 도입 항목</h1>
+  <form id="f">
+    <label>이름 <input name="name" required></label>
+    <label>목표 <textarea name="goal" required></textarea></label>
+    <label>대상자 <textarea name="target_audience" required></textarea></label>
+    <label>우려사항 <textarea name="concern"></textarea></label>
+    <label>목표 인원 <input type="number" name="target_count" min="1" required></label>
+    <button>생성</button>
+  </form>
+</main>
+<script src="/js/admin-common.js"></script>
+<script>
+document.getElementById('f').addEventListener('submit', async e => {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(e.target));
+  data.target_count = parseInt(data.target_count, 10);
+  if (!data.concern) delete data.concern;
+  const r = await authFetch('/api/admin/adoptions', { method: 'POST', body: data }).then(r => r.json());
+  location.href = `/admin/adoptions/${r.id}`;
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <title>도입 상세</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.indigo.min.css">
+  <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body>
+<header class="container">
+  <nav>
+    <ul><li><strong>AdoptLoop</strong></li></ul>
+    <ul><li><a href="/admin/adoptions">도입 항목</a></li></ul>
+  </nav>
+</header>
+<main class="container">
+  <hgroup>
+    <h1 id="name">…</h1>
+    <p id="goal"></p>
+  </hgroup>
+  <article>
+    <header>AI 설문 초안 생성</header>
+    <label>마감 <input type="datetime-local" id="deadline"></label>
+    <button id="gen" type="button">생성</button>
+  </article>
+</main>
+<script src="/js/admin-common.js"></script>
+<script>
+const id = location.pathname.split('/').pop();
+
+// 마감 기본값: 지금부터 14일 뒤 (datetime-local 포맷 yyyy-MM-ddTHH:mm, 로컬 시간 기준)
+const def = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+def.setMinutes(def.getMinutes() - def.getTimezoneOffset());
+document.getElementById('deadline').value = def.toISOString().slice(0, 16);
+
+authFetch(`/api/admin/adoptions/${id}`).then(r => r.json()).then(a => {
+  document.getElementById('name').textContent = a.name;
+  document.getElementById('goal').textContent = a.goal;
+});
+
+document.getElementById('gen').onclick = async () => {
+  const local = document.getElementById('deadline').value;
+  if (!local) { alert('마감 일시를 입력하세요'); return; }
+  const deadline = new Date(local).toISOString();
+  const res = await authFetch(`/api/admin/adoptions/${id}/surveys`, { method: 'POST', body: { deadline } });
+  if (!res.ok) { alert(`오류: ${res.status}`); return; }
+  const r = await res.json();
+  location.href = `/admin/surveys/${r.survey.id}/edit`;
+};
+</script>
+</body>
+</html>

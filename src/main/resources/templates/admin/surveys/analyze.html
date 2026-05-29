@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <title>분석</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.indigo.min.css">
+  <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body>
+<header class="container">
+  <nav>
+    <ul><li><strong>AdoptLoop</strong></li></ul>
+    <ul><li><a href="/admin/adoptions">도입 항목</a></li></ul>
+  </nav>
+</header>
+<main class="container">
+  <h1>분석</h1>
+  <article>
+    <header>집계</header>
+    <pre id="agg">로딩...</pre>
+  </article>
+  <button id="run" type="button">분석 실행</button>
+  <section id="result" style="display:none">
+    <article>
+      <header>점수</header>
+      <table id="scores"></table>
+    </article>
+    <article>
+      <header>제안 액션</header>
+      <ul id="suggested"></ul>
+      <button id="adopt" type="button">선택한 항목 채택</button>
+    </article>
+  </section>
+</main>
+<script src="/js/admin-common.js"></script>
+<script>
+const surveyId = location.pathname.split('/')[3];   // /admin/surveys/{id}/analyze
+let suggested = [], adoptionId = null;
+
+authFetch(`/api/admin/surveys/${surveyId}`).then(r => r.json()).then(d => {
+  adoptionId = d.survey.adoption_id;
+});
+
+authFetch(`/api/admin/surveys/${surveyId}/aggregate`).then(r => r.json()).then(a => {
+  document.getElementById('agg').textContent = JSON.stringify(a, null, 2);
+});
+
+document.getElementById('run').onclick = async () => {
+  const r = await authFetch(`/api/admin/surveys/${surveyId}/analyses`, { method: 'POST' });
+  if (!r.ok) { alert(`오류: ${r.status}`); return; }
+  const data = await r.json();
+  const a = data.analysis;
+  document.getElementById('scores').innerHTML = `
+    <tr><th>정착도</th><td>${a.adoption_score}</td></tr>
+    <tr><th>사용</th><td>${a.usage_score}</td></tr>
+    <tr><th>행동</th><td>${a.behavior_score}</td></tr>
+    <tr><th>가치</th><td>${a.value_score}</td></tr>`;
+  suggested = data.suggested_action_items.map(s => ({ ...s, analysis_id: a.id }));
+  const ul = document.getElementById('suggested');
+  ul.innerHTML = '';
+  suggested.forEach((s, i) => {
+    const li = document.createElement('li');
+    li.innerHTML = `<label><input type="checkbox" data-i="${i}"> [${s.priority}] ${s.title}
+      <small>${s.description ?? ''}</small></label>`;
+    ul.appendChild(li);
+  });
+  document.getElementById('result').style.display = 'block';
+};
+
+document.getElementById('adopt').onclick = async () => {
+  const picked = [...document.querySelectorAll('#suggested input:checked')].map(el => suggested[+el.dataset.i]);
+  if (!picked.length) { alert('항목을 선택하세요'); return; }
+  const r = await authFetch(`/api/admin/adoptions/${adoptionId}/action-items`, { method: 'POST', body: picked });
+  alert(r.ok ? '채택됨' : `오류: ${r.status}`);
+  if (r.ok) location.href = `/admin/adoptions/${adoptionId}`;
+};
+</script>
+</body>
+</html>
