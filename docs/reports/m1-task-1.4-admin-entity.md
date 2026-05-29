@@ -32,6 +32,7 @@
 - 수정: `implementation("org.springframework.boot:spring-boot-flyway")` 추가 → Flyway 정상 실행, GREEN.
 
 **`/code-review` (medium, 로직 작업 자동 실행) — finder 3 + 자체검증:**
+
 | 발견 | 처리 |
 |------|------|
 | 테스트가 `createdAt`(감사 결과) 미검증 → 감사 깨져도 green | ✅ 적용 — `assertTrue(saved.createdAt.isAfter(Instant.EPOCH))` 추가, 재실행 PASS |
