@@ -1,3 +1,32 @@
 spring:
   application:
     name: adoptloop-server
+  profiles:
+    default: local
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+adoptloop:
+  admin:
+    bootstrap-name: ${ADOPTLOOP_ADMIN_NAME:}
+    bootstrap-key: ${ADOPTLOOP_ADMIN_KEY:}
+  bedrock:
+    model: anthropic.claude-haiku-4-5-20251001-v1:0
+    region: ${AWS_REGION:ap-northeast-2}
+  slack:
+    webhook-url: ${ADOPTLOOP_SLACK_WEBHOOK_URL:}
+  public-base-url: ${ADOPTLOOP_PUBLIC_BASE_URL:http://localhost:8080}
+
+logging:
+  level:
+    org.hibernate.SQL: INFO

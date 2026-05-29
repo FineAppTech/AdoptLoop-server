@@ -24,6 +24,7 @@ AdoptLoop는 설문 작성 → 발행 → 응답 수집 → LLM 분석 → Actio
 - 인덱스 갱신: 새 ADR 추가 시 `docs/adr/README.md` 표에 한 줄 append 필수.
 
 ## 개발 규칙
+- **작업 워크플로우**: 7단계 절차(보고→수행→셀프검증/리뷰→결과보고→보고서→승인→커밋)·보고서·커밋·네이밍 규칙은 [WORKFLOW.md](WORKFLOW.md) 참조.
 - **테스트 강제**: 모든 컨트롤러 테스트는 Spring REST Docs `document()` 호출 필수. JUnit Extension이 미호출 시 fail. → [ADR-0009](adr/0009-spring-restdocs-enforcement.md)
 
 ## 현재 상태

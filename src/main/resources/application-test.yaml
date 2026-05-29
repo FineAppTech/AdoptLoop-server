@@ -1,0 +1,6 @@
+spring:
+  flyway:
+    clean-disabled: false
+logging:
+  level:
+    org.hibernate.SQL: WARN
