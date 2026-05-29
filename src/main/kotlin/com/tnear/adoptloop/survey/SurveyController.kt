@@ -1,6 +1,7 @@
 package com.tnear.adoptloop.survey
 
 import com.tnear.adoptloop.admin.auth.AdminContext
+import com.tnear.adoptloop.survey.draft.SurveyDraftService
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.GetMapping
@@ -16,8 +17,16 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/admin")
 class SurveyController(
     private val service: SurveyService,
+    private val draftService: SurveyDraftService,
     private val adminContext: AdminContext,
 ) {
+    @PostMapping("/adoptions/{adoptionId}/surveys")
+    @ResponseStatus(HttpStatus.CREATED)
+    fun generateDraft(@PathVariable adoptionId: Long, @Valid @RequestBody req: SurveyDraftReq): SurveyDetailRes {
+        val id = draftService.generate(adminContext.require(), adoptionId, req.deadline)
+        return toDetail(id)
+    }
+
     @GetMapping("/surveys/{id}")
     fun detail(@PathVariable id: Long): SurveyDetailRes = toDetail(id)
 
