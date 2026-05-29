@@ -172,6 +172,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-thymeleaf")
+    implementation("org.springframework.boot:spring-boot-flyway")
     implementation("org.flywaydb:flyway-core")
     implementation("org.flywaydb:flyway-database-postgresql")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
@@ -499,7 +500,7 @@ git commit -m "db: V1 init migration (9 tables, JSONB + answers CHECK)"
 **Files:**
 - Create: `src/main/kotlin/com/tnear/adoptloop/domain/Enums.kt`
 - Create: `src/main/kotlin/com/tnear/adoptloop/domain/Admin.kt`
-- Create: `src/main/kotlin/com/tnear/adoptloop/domain/repo/AdminRepository.kt`
+- Create: `src/main/kotlin/com/tnear/adoptloop/domain/repository/AdminRepository.kt`
 - Create: `src/main/kotlin/com/tnear/adoptloop/config/JpaConfig.kt`
 - Create: `src/test/kotlin/com/tnear/adoptloop/IntegrationTestBase.kt`
 - Create: `src/test/kotlin/com/tnear/adoptloop/domain/AdminRepositoryTest.kt`
@@ -555,7 +556,7 @@ abstract class IntegrationTestBase {
 package com.tnear.adoptloop.domain
 
 import com.tnear.adoptloop.IntegrationTestBase
-import com.tnear.adoptloop.domain.repo.AdminRepository
+import com.tnear.adoptloop.domain.repository.AdminRepository
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import kotlin.test.assertEquals
@@ -624,7 +625,7 @@ class Admin(
 - [ ] **Step 6: AdminRepository**
 
 ```kotlin
-package com.tnear.adoptloop.domain.repo
+package com.tnear.adoptloop.domain.repository
 
 import com.tnear.adoptloop.domain.Admin
 import org.springframework.data.jpa.repository.JpaRepository
@@ -676,7 +677,7 @@ package com.tnear.adoptloop.admin
 
 import com.tnear.adoptloop.IntegrationTestBase
 import com.tnear.adoptloop.domain.Admin
-import com.tnear.adoptloop.domain.repo.AdminRepository
+import com.tnear.adoptloop.domain.repository.AdminRepository
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -733,7 +734,7 @@ class AdminContext {
 ```kotlin
 package com.tnear.adoptloop.admin.auth
 
-import com.tnear.adoptloop.domain.repo.AdminRepository
+import com.tnear.adoptloop.domain.repository.AdminRepository
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -800,7 +801,7 @@ git commit -m "auth: AdminKeyFilter (X-Admin-Key → SHA-256)"
 package com.tnear.adoptloop.admin
 
 import com.tnear.adoptloop.domain.Admin
-import com.tnear.adoptloop.domain.repo.AdminRepository
+import com.tnear.adoptloop.domain.repository.AdminRepository
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.CommandLineRunner
 import org.springframework.stereotype.Component
@@ -1118,12 +1119,12 @@ git commit -m "domain: 8 JPA entities (Adoption, Survey, Question, Option, Respo
 ### Task 2.2: 8개 Repository
 
 **Files:**
-- Create: `src/main/kotlin/com/tnear/adoptloop/domain/repo/{Adoption,Survey,Question,QuestionOption,SurveyResponse,Answer,Analysis,ActionItem}Repository.kt`
+- Create: `src/main/kotlin/com/tnear/adoptloop/domain/repository/{Adoption,Survey,Question,QuestionOption,SurveyResponse,Answer,Analysis,ActionItem}Repository.kt`
 
 - [ ] **Step 1: 한 파일로 묶어 작성**
 
 ```kotlin
-package com.tnear.adoptloop.domain.repo
+package com.tnear.adoptloop.domain.repository
 
 import com.tnear.adoptloop.domain.*
 import org.springframework.data.jpa.repository.JpaRepository
@@ -1181,7 +1182,7 @@ Expected: 0 종료.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add src/main/kotlin/com/tnear/adoptloop/domain/repo
+git add src/main/kotlin/com/tnear/adoptloop/domain/repository
 git commit -m "domain: 8 JPA repositories"
 ```
 
@@ -1327,7 +1328,7 @@ package com.tnear.adoptloop.adoption
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.tnear.adoptloop.ControllerTestBase
 import com.tnear.adoptloop.domain.Admin
-import com.tnear.adoptloop.domain.repo.AdminRepository
+import com.tnear.adoptloop.domain.repository.AdminRepository
 import com.tnear.adoptloop.restdocs.documentApi
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -1455,7 +1456,7 @@ data class AdoptionRes(
 package com.tnear.adoptloop.adoption
 
 import com.tnear.adoptloop.domain.Adoption
-import com.tnear.adoptloop.domain.repo.AdoptionRepository
+import com.tnear.adoptloop.domain.repository.AdoptionRepository
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -1692,7 +1693,7 @@ data class SurveyDetailRes(val survey: SurveyRes, val questions: List<QuestionVo
 package com.tnear.adoptloop.survey
 
 import com.tnear.adoptloop.domain.*
-import com.tnear.adoptloop.domain.repo.*
+import com.tnear.adoptloop.domain.repository.*
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import com.tnear.adoptloop.survey.publish.SurveyPublisher
@@ -1916,7 +1917,7 @@ package com.tnear.adoptloop.survey
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.tnear.adoptloop.ControllerTestBase
 import com.tnear.adoptloop.domain.*
-import com.tnear.adoptloop.domain.repo.*
+import com.tnear.adoptloop.domain.repository.*
 import com.tnear.adoptloop.restdocs.documentApi
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -2151,7 +2152,7 @@ class SurveyDraftParser(private val om: ObjectMapper) {
 package com.tnear.adoptloop.survey.draft
 
 import com.tnear.adoptloop.config.LlmTransientException
-import com.tnear.adoptloop.domain.repo.AdoptionRepository
+import com.tnear.adoptloop.domain.repository.AdoptionRepository
 import com.tnear.adoptloop.survey.SurveyService
 import org.springframework.ai.chat.client.ChatClient
 import org.springframework.http.HttpStatus
@@ -2211,7 +2212,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.ninja_squad.springmockk.MockkBean
 import com.tnear.adoptloop.ControllerTestBase
 import com.tnear.adoptloop.domain.*
-import com.tnear.adoptloop.domain.repo.*
+import com.tnear.adoptloop.domain.repository.*
 import com.tnear.adoptloop.restdocs.documentApi
 import io.mockk.every
 import io.mockk.mockk
@@ -2357,7 +2358,7 @@ data class PublicResponseRes(
 package com.tnear.adoptloop.publicapi
 
 import com.tnear.adoptloop.domain.*
-import com.tnear.adoptloop.domain.repo.*
+import com.tnear.adoptloop.domain.repository.*
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -2461,8 +2462,8 @@ class PublicResponseService(
 ```kotlin
 package com.tnear.adoptloop.publicapi
 
-import com.tnear.adoptloop.domain.repo.QuestionOptionRepository
-import com.tnear.adoptloop.domain.repo.QuestionRepository
+import com.tnear.adoptloop.domain.repository.QuestionOptionRepository
+import com.tnear.adoptloop.domain.repository.QuestionRepository
 import com.tnear.adoptloop.survey.OptionVo
 import com.tnear.adoptloop.survey.QuestionVo
 import org.springframework.http.HttpStatus
@@ -2523,7 +2524,7 @@ package com.tnear.adoptloop.publicapi
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.tnear.adoptloop.ControllerTestBase
 import com.tnear.adoptloop.domain.*
-import com.tnear.adoptloop.domain.repo.*
+import com.tnear.adoptloop.domain.repository.*
 import com.tnear.adoptloop.restdocs.documentApi
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -2696,7 +2697,7 @@ package com.tnear.adoptloop.analysis
 
 import com.tnear.adoptloop.domain.ResponseStatus
 import com.tnear.adoptloop.domain.QuestionType
-import com.tnear.adoptloop.domain.repo.*
+import com.tnear.adoptloop.domain.repository.*
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -2756,7 +2757,7 @@ package com.tnear.adoptloop.analysis
 
 import com.tnear.adoptloop.IntegrationTestBase
 import com.tnear.adoptloop.domain.*
-import com.tnear.adoptloop.domain.repo.*
+import com.tnear.adoptloop.domain.repository.*
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import java.time.Instant
@@ -2942,7 +2943,7 @@ package com.tnear.adoptloop.analysis
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.tnear.adoptloop.domain.*
-import com.tnear.adoptloop.domain.repo.*
+import com.tnear.adoptloop.domain.repository.*
 import org.springframework.ai.chat.client.ChatClient
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -3087,10 +3088,10 @@ data class ActionItemRes(
 package com.tnear.adoptloop.actionitem
 
 import com.tnear.adoptloop.domain.ActionItem
-import com.tnear.adoptloop.domain.repo.ActionItemRepository
-import com.tnear.adoptloop.domain.repo.AdoptionRepository
-import com.tnear.adoptloop.domain.repo.AnalysisRepository
-import com.tnear.adoptloop.domain.repo.SurveyRepository
+import com.tnear.adoptloop.domain.repository.ActionItemRepository
+import com.tnear.adoptloop.domain.repository.AdoptionRepository
+import com.tnear.adoptloop.domain.repository.AnalysisRepository
+import com.tnear.adoptloop.domain.repository.SurveyRepository
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -3189,7 +3190,7 @@ package com.tnear.adoptloop.analysis
 
 import com.tnear.adoptloop.ControllerTestBase
 import com.tnear.adoptloop.domain.*
-import com.tnear.adoptloop.domain.repo.*
+import com.tnear.adoptloop.domain.repository.*
 import com.tnear.adoptloop.restdocs.documentApi
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -3260,7 +3261,7 @@ package com.tnear.adoptloop.actionitem
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.tnear.adoptloop.ControllerTestBase
 import com.tnear.adoptloop.domain.*
-import com.tnear.adoptloop.domain.repo.*
+import com.tnear.adoptloop.domain.repository.*
 import com.tnear.adoptloop.restdocs.documentApi
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -3803,7 +3804,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.ninja_squad.springmockk.MockkBean
 import com.tnear.adoptloop.IntegrationTestBase
 import com.tnear.adoptloop.domain.Admin
-import com.tnear.adoptloop.domain.repo.AdminRepository
+import com.tnear.adoptloop.domain.repository.AdminRepository
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Test
@@ -3930,7 +3931,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.ninja_squad.springmockk.MockkBean
 import com.tnear.adoptloop.IntegrationTestBase
 import com.tnear.adoptloop.domain.Admin
-import com.tnear.adoptloop.domain.repo.AdminRepository
+import com.tnear.adoptloop.domain.repository.AdminRepository
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Test
