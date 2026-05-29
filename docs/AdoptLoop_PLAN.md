@@ -1255,6 +1255,7 @@ fun documentApi(identifier: String, vararg snippets: Snippet): ResultHandler {
 ```kotlin
 package com.tnear.adoptloop
 
+import com.tnear.adoptloop.admin.auth.AdminKeyFilter
 import com.tnear.adoptloop.restdocs.RequireDocumentationExtension
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.extension.ExtendWith
@@ -1270,11 +1271,18 @@ import org.springframework.web.context.WebApplicationContext
 @ExtendWith(RestDocumentationExtension::class, RequireDocumentationExtension::class)
 abstract class ControllerTestBase : IntegrationTestBase() {
     @Autowired protected lateinit var context: WebApplicationContext
+
+    // webAppContextSetup은 @AutoConfigureMockMvc와 달리 필터 빈을 자동 등록하지 않으므로
+    // AdminKeyFilter를 명시 등록한다 (인증 경로 /api/admin/**). 공개 엔드포인트는 필터의
+    // shouldNotFilter가 통과시킨다.
+    @Autowired protected lateinit var adminKeyFilter: AdminKeyFilter
+
     protected lateinit var mvc: MockMvc
 
     @BeforeEach
     fun setUpMvc(restDocumentation: RestDocumentationContextProvider) {
         mvc = MockMvcBuilders.webAppContextSetup(context)
+            .addFilters<DefaultMockMvcBuilder>(adminKeyFilter)
             .apply<DefaultMockMvcBuilder>(documentationConfiguration(restDocumentation))
             .build()
     }
@@ -1282,6 +1290,7 @@ abstract class ControllerTestBase : IntegrationTestBase() {
 ```
 
 > 규칙: 컨트롤러 endpoint 테스트는 `IntegrationTestBase`가 아닌 **`ControllerTestBase`**를 상속한다. 그리고 표준 `document(...)` 대신 **`documentApi(...)`**를 호출해야 한다.
+> ⚠️ `webAppContextSetup`은 서블릿 필터 빈을 자동 등록하지 않으므로 `AdminKeyFilter`를 `.addFilters(...)`로 명시 등록해야 인증 경로(`/api/admin/**`)가 동작한다. (M2 Task 2.4 TDD에서 확인.)
 
 - [ ] **Step 5: src/docs/asciidoc/index.adoc (placeholder)**
 
@@ -1324,7 +1333,7 @@ git commit -m "test: ControllerTestBase + RequireDocumentationExtension (REST Do
 ```kotlin
 package com.tnear.adoptloop.adoption
 
-import com.fasterxml.jackson.databind.ObjectMapper
+import tools.jackson.databind.ObjectMapper
 import com.tnear.adoptloop.ControllerTestBase
 import com.tnear.adoptloop.domain.Admin
 import com.tnear.adoptloop.domain.repository.AdminRepository
@@ -1340,15 +1349,15 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 import java.security.MessageDigest
 
 class AdoptionControllerTest @Autowired constructor(
-    private val adminRepo: AdminRepository,
-    private val om: ObjectMapper,
+    private val adminRepository: AdminRepository,
+    private val objectMapper: ObjectMapper,
 ) : ControllerTestBase() {
 
     private fun seedAdminKey(): String {
         val raw = "k-${System.nanoTime()}"
         val hash = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray())
             .joinToString("") { "%02x".format(it) }
-        adminRepo.save(Admin(name = "tester", keyHash = hash))
+        adminRepository.save(Admin(name = "tester", keyHash = hash))
         return raw
     }
 
@@ -1365,7 +1374,7 @@ class AdoptionControllerTest @Autowired constructor(
             post("/api/admin/adoptions")
                 .header("X-Admin-Key", key)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(om.writeValueAsString(body))
+                .content(objectMapper.writeValueAsString(body))
         )
             .andExpect(status().isCreated)
             .andExpect(jsonPath("$.id").exists())
@@ -1441,9 +1450,9 @@ data class AdoptionRes(
     val updatedAt: Instant,
 ) {
     companion object {
-        fun from(a: Adoption) = AdoptionRes(
-            a.id!!, a.adminId, a.name, a.goal, a.targetAudience, a.concern,
-            a.targetCount, a.status, a.createdAt, a.updatedAt,
+        fun from(adoption: Adoption) = AdoptionRes(
+            adoption.id!!, adoption.adminId, adoption.name, adoption.goal, adoption.targetAudience,
+            adoption.concern, adoption.targetCount, adoption.status, adoption.createdAt, adoption.updatedAt,
         )
     }
 }
@@ -1463,10 +1472,10 @@ import org.springframework.web.server.ResponseStatusException
 
 @Service
 @Transactional
-class AdoptionService(private val repo: AdoptionRepository) {
+class AdoptionService(private val adoptionRepository: AdoptionRepository) {
 
     fun create(adminId: Long, req: AdoptionCreateReq): Adoption =
-        repo.save(Adoption(
+        adoptionRepository.save(Adoption(
             adminId = adminId,
             name = req.name,
             goal = req.goal,
@@ -1476,24 +1485,24 @@ class AdoptionService(private val repo: AdoptionRepository) {
         ))
 
     @Transactional(readOnly = true)
-    fun listForAdmin(adminId: Long): List<Adoption> = repo.findAllByAdminId(adminId)
+    fun listForAdmin(adminId: Long): List<Adoption> = adoptionRepository.findAllByAdminId(adminId)
 
     @Transactional(readOnly = true)
     fun get(adminId: Long, id: Long): Adoption {
-        val a = repo.findById(id).orElseThrow { NoSuchElementException("adoption $id") }
-        if (a.adminId != adminId) throw ResponseStatusException(HttpStatus.FORBIDDEN, "not owner")
-        return a
+        val adoption = adoptionRepository.findById(id).orElseThrow { NoSuchElementException("adoption $id") }
+        if (adoption.adminId != adminId) throw ResponseStatusException(HttpStatus.FORBIDDEN, "not owner")
+        return adoption
     }
 
     fun update(adminId: Long, id: Long, req: AdoptionUpdateReq): Adoption {
-        val a = get(adminId, id)
-        req.name?.let { a.name = it }
-        req.goal?.let { a.goal = it }
-        req.targetAudience?.let { a.targetAudience = it }
-        req.concern?.let { a.concern = it }
-        req.targetCount?.let { a.targetCount = it }
-        req.status?.let { a.status = it }
-        return a
+        val adoption = get(adminId, id)
+        req.name?.let { adoption.name = it }
+        req.goal?.let { adoption.goal = it }
+        req.targetAudience?.let { adoption.targetAudience = it }
+        req.concern?.let { adoption.concern = it }
+        req.targetCount?.let { adoption.targetCount = it }
+        req.status?.let { adoption.status = it }
+        return adoption
     }
 }
 ```
