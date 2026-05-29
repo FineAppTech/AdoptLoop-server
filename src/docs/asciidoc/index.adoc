@@ -1,0 +1,7 @@
+= AdoptLoop API Reference
+:source-highlighter: highlightjs
+:toc: left
+:icons: font
+
+이 문서는 빌드 시 `build/generated-snippets/`에서 자동 생성된다.
+컨트롤러 endpoint별 스니펫이 추가되면 `include::{snippets}/<operation-id>/...[]`로 합본한다.

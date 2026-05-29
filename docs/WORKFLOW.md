@@ -38,8 +38,10 @@
 
 ## 네이밍 규칙
 
-- **약어 금지** — 패키지/디렉토리/식별자는 전체 단어로. 예) `repo` ❌ → `repository` ✅.
+- **약어 금지** — 패키지/디렉토리/식별자는 전체 단어로. 예) `repo` ❌ → `repository` ✅. (테스트 인프라 표준 idiom `mvc`/`ctx`는 예외.)
 - DB: snake_case 소문자, FK 컬럼은 `단수테이블명_id`.
+- **테스트 메서드명은 한국어 문장형** (백틱) — 명세처럼 읽히게. 예) `` `남의 도입을 조회하면 403` ``. (M2부터 적용; M1은 머지되어 현행 유지.)
+  - 단, REST Docs `documentApi("...")` **식별자는 ASCII kebab-case** 유지 — `build/generated-snippets/`의 폴더명이 되므로. 예) `get-adoption-forbidden`.
 
 ## 실행 스타일
 
