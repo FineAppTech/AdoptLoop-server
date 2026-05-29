@@ -682,12 +682,11 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.web.servlet.MockMvc
-import org.springframework.test.web.servlet.assertj.MockMvcTester
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
-import java.security.MessageDigest
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
-@org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
+@org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 class AdminKeyFilterTest @Autowired constructor(
     private val mvc: MockMvc,
 ) : IntegrationTestBase() {
@@ -695,13 +694,13 @@ class AdminKeyFilterTest @Autowired constructor(
     @Test
     fun `missing key returns 401`() {
         mvc.perform(get("/api/admin/adoptions"))
-            .andExpect { it.response.status == 401 }
+            .andExpect(status().isUnauthorized())
     }
 
     @Test
     fun `invalid key returns 401`() {
         mvc.perform(get("/api/admin/adoptions").header("X-Admin-Key", "no-such-key"))
-            .andExpect { it.response.status == 401 }
+            .andExpect(status().isUnauthorized())
     }
 }
 
@@ -3811,7 +3810,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.ai.chat.client.ChatClient
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
@@ -3938,7 +3937,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.ai.chat.client.ChatClient
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
