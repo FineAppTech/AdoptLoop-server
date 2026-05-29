@@ -6,6 +6,7 @@ import com.tnear.adoptloop.domain.QuestionOption
 import com.tnear.adoptloop.domain.QuestionType
 import com.tnear.adoptloop.domain.Survey
 import com.tnear.adoptloop.domain.SurveyStatus
+import jakarta.validation.constraints.Future
 import jakarta.validation.constraints.NotBlank
 import java.time.Instant
 
@@ -24,7 +25,7 @@ data class OptionReq(
 )
 
 data class SurveyDraftReq(
-    val deadline: Instant,
+    @field:Future val deadline: Instant,
 )
 
 data class OptionVo(val id: Long, val text: String, val orderIndex: Int) {
